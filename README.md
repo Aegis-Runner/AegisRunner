@@ -59,7 +59,7 @@ Tested against real-world production websites built with major frameworks — ze
 │                                                                 │
 │  ┌───────────────┐    ┌───────────────┐    ┌───────────────┐  │
 │  │   Frontend    │    │   Backend     │    │   Crawler     │  │
-│  │   (React)     │───▶│   (Go/Fiber)  │───▶│   (Node.js)   │  │
+│  │  (Nuxt/Vue)   │───▶│   (Go/Fiber)  │───▶│   (Node.js)   │  │
 │  │               │    │               │    │  (Playwright) │  │
 │  └───────────────┘    └───────────────┘    └───────────────┘  │
 │                              │                     │           │
