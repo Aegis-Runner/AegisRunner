@@ -110,12 +110,12 @@ Tested against real-world production websites — zero manual test authoring, fu
 ## Architecture
 
 ```
-Frontend (Nuxt 3 / Vue)  →  Backend (Go / Fiber)  →  Crawler (Node.js / Playwright)
+Frontend (Nuxt 4 / Vue)  →  Backend (Go / Fiber)  →  Crawler (Node.js / Playwright)
                                     ↓
                             PostgreSQL + Redis
 ```
 
-- **Frontend**: Nuxt 3, Vue 3, Tailwind CSS, WebSocket real-time updates
+- **Frontend**: Nuxt 4, Vue 3, Tailwind CSS, WebSocket real-time updates
 - **Backend**: Go with Fiber framework, JWT auth, RBAC, WebSocket hub
 - **Crawler**: Node.js with Playwright (Chromium, Firefox, WebKit), Patchright stealth
 - **Database**: PostgreSQL 18, Redis 7 for caching/pub-sub
