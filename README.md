@@ -7,12 +7,13 @@
 <h1 align="center"><a href="https://aegisrunner.com">AegisRunner</a></h1>
 
 <p align="center">
-  <strong>Enter a URL, get a full test suite.</strong><br/>
-  AI-powered web crawler that discovers pages, generates Playwright tests, and audits accessibility, SEO, security & performance — automatically.
+  <strong>Enter a URL or upload your app, get a full test suite.</strong><br/>
+  AI that tests your website <em>and</em> your native iOS &amp; Android apps on real devices — discovering flows, generating Playwright tests, and auditing accessibility, SEO, security &amp; performance, automatically.
 </p>
 
 <p align="center">
   <a href="https://aegisrunner.com/scan"><strong>Free Website Audit</strong></a> &middot;
+  <a href="https://aegisrunner.com/use-cases/mobile-app-testing-automation"><strong>Mobile App Testing</strong></a> &middot;
   <a href="https://aegisrunner.com/live-demos"><strong>Live Demos</strong></a> &middot;
   <a href="https://aegisrunner.com/docs"><strong>Docs</strong></a> &middot;
   <a href="https://aegisrunner.com/pricing"><strong>Pricing</strong></a> &middot;
@@ -30,16 +31,16 @@
 
 ## What is AegisRunner?
 
-[AegisRunner](https://aegisrunner.com) is a regression testing platform that crawls your website like a real user, discovers every page and interactive state, then generates production-ready Playwright test suites using AI.
+[AegisRunner](https://aegisrunner.com) is a regression testing platform for **web and mobile**. It crawls your website like a real user — and explores your native **iOS &amp; Android** apps on **real physical devices** — discovering every page, screen and interactive state, then generates production-ready Playwright test suites using AI. It's the only platform that tests your app and your website in one **cross-platform journey**, catching the moment mobile and web drift out of sync.
 
-**No scripts to write. No selectors to maintain. Just paste your URL.**
+**No scripts to write. No selectors to maintain. No Appium setup. Just paste your URL or upload your build.**
 
 ### How it works
 
-1. **Crawl** — AegisRunner navigates your site using real browsers (Chromium, Firefox, WebKit), clicking buttons, filling forms, and discovering UI states
+1. **Crawl / explore** — AegisRunner navigates your site using real browsers (Chromium, Firefox, WebKit), and explores your `.apk` / `.ipa` on real iOS &amp; Android devices, clicking buttons, filling forms, and discovering UI states
 2. **Audit** — Every page gets accessibility (WCAG/axe-core), SEO, security header, and Core Web Vitals analysis
 3. **Generate** — AI creates Playwright test specs from discovered states — exportable as `.spec.ts` files
-4. **Run** — Execute tests on every deploy via CI/CD integration (GitHub Actions, GitLab CI, Jenkins)
+4. **Run** — Execute tests on real browsers and real devices on every deploy via CI/CD integration (GitHub Actions, GitLab CI, Jenkins)
 
 ### Try it free
 
@@ -90,6 +91,14 @@ Tested against real-world production websites — zero manual test authoring, fu
 - BYOK — bring your own API key (OpenAI, Anthropic, Google, etc.)
 - Export as `.spec.ts` files ready for your CI/CD pipeline
 
+### Mobile App Testing (iOS &amp; Android)
+- Upload an Android `.apk` or iOS `.ipa` — no Appium, no SDK, no device lab
+- AI explores your app **live on a real device** (iPhone, Pixel, Samsung Galaxy)
+- Generates and runs grounded test cases on real hardware — no scripts
+- Native iOS, native Android, React Native, Flutter and mobile web
+- **Cross-platform sync** — one journey acts in the app and verifies on the website
+- Self-healing, semantic selectors instead of brittle XCUI / UiAutomator locators
+
 ### Visual Regression Testing
 - Pixel-level screenshot comparison (pixelmatch)
 - Baseline accept/reject workflow
@@ -107,26 +116,11 @@ Tested against real-world production websites — zero manual test authoring, fu
 
 ---
 
-## Architecture
-
-```
-Frontend (Nuxt 4 / Vue)  →  Backend (Go / Fiber)  →  Crawler (Node.js / Playwright)
-                                    ↓
-                            PostgreSQL + Redis
-```
-
-- **Frontend**: Nuxt 4, Vue 3, Tailwind CSS, WebSocket real-time updates
-- **Backend**: Go with Fiber framework, JWT auth, RBAC, WebSocket hub
-- **Crawler**: Node.js with Playwright (Chromium, Firefox, WebKit), Patchright stealth
-- **Database**: PostgreSQL 18, Redis 7 for caching/pub-sub
-- **Deployment**: Docker Swarm, Hetzner Cloud
-
----
-
 ## Links
 
 - **Website**: [aegisrunner.com](https://aegisrunner.com)
 - **Free Scan**: [aegisrunner.com/scan](https://aegisrunner.com/scan)
+- **Mobile App Testing**: [aegisrunner.com/use-cases/mobile-app-testing-automation](https://aegisrunner.com/use-cases/mobile-app-testing-automation)
 - **Live Demos**: [aegisrunner.com/live-demos](https://aegisrunner.com/live-demos)
 - **Documentation**: [aegisrunner.com/docs](https://aegisrunner.com/docs)
 - **Blog**: [aegisrunner.com/blog](https://aegisrunner.com/blog)
