@@ -61,6 +61,7 @@ test-generation progress until it finishes (or open the printed dashboard link).
 aegis scan                                            # project's configured base URL
 aegis scan --url https://staging.example.com          # must be on the project's domain
 aegis scan --url https://staging.example.com --watch  # stream live progress until done
+aegis scan --tunnel --port 3000                       # scan a LOCAL app: tunnel + scan + watch, one command
 ```
 
 With `--watch` the CLI streams crawl and test-generation progress live (over
@@ -95,6 +96,12 @@ It prints a public URL — point a scan at it (`aegis scan --url <public-url>` o
 the dashboard), then press **Ctrl-C** when done. The tunnel is ephemeral: it
 lives only while the command runs. Uses the same `--token` / `--api` as the
 other commands.
+
+**Simpler — one command:** `aegis scan --tunnel --port 3000` opens the tunnel,
+scans it, and streams progress **in a single process**, keeping the tunnel alive
+for the whole scan. No separate URL to copy, and no risk of the tunnel dropping
+mid-scan. Prefer this for local apps; use standalone `aegis tunnel` only when you
+want to point several scans (or the dashboard) at one long-lived tunnel.
 
 For fully offline or VPN-only environments where you can't tunnel out, use a
 **self-hosted runner** (below) instead.

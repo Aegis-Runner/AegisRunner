@@ -44,7 +44,7 @@ async function handleReq(base, tunnelId, authHeaders, target, req, log) {
   }).catch(() => {});
 }
 
-export async function runTunnel({ api, token, port, host, log }) {
+export async function runTunnel({ api, token, port, host, log, onReady, signal }) {
   const base = (api || DEFAULT_API).replace(/\/+$/, '');
   const authHeaders = { Authorization: `Bearer ${token}` };
   const target = `http://${host}:${port}`;
@@ -60,8 +60,10 @@ export async function runTunnel({ api, token, port, host, log }) {
   log(`  Tunnel open`);
   log(`  Forwarding  ${publicUrl}  →  ${target}`);
   log('');
-  log('  Point a scan at the public URL above. Press Ctrl-C to stop.');
-  log('');
+  if (!onReady) {
+    log('  Point a scan at the public URL above. Press Ctrl-C to stop.');
+    log('');
+  }
 
   const shutdown = () => process.exit(0);
   process.on('SIGINT', shutdown);
@@ -71,10 +73,16 @@ export async function runTunnel({ api, token, port, host, log }) {
   try { await fetch(target, { method: 'HEAD' }); }
   catch { log(`  ! Nothing responding at ${target} yet — start your app; requests 502 until it's up.`); log(''); }
 
+  // Combined mode (aegis scan --tunnel): hand the URL back so the caller can
+  // scan it while THIS process keeps polling — that concurrent poll loop is
+  // exactly what keeps the tunnel alive for the whole scan. Fire-and-forget.
+  if (onReady) Promise.resolve().then(() => onReady(publicUrl));
+
   for (;;) {
+    if (signal?.aborted) return;
     let res;
-    try { res = await fetch(`${base}/tunnel/${tunnelId}/poll`, { headers: authHeaders }); }
-    catch { await sleep(1000); continue; }
+    try { res = await fetch(`${base}/tunnel/${tunnelId}/poll`, { headers: authHeaders, signal }); }
+    catch { if (signal?.aborted) return; await sleep(1000); continue; }
     if (res.status === 204) continue;                 // idle window elapsed — re-poll
     if (res.status === 404) { log('  Tunnel closed.'); return; }
     if (!res.ok) { await sleep(1000); continue; }

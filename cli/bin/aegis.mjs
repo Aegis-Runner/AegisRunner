@@ -55,16 +55,21 @@ Exit codes: 0 all passed · 1 test failures · 2 error/timeout/cancelled`,
     fn: cmdRun,
   },
   scan: {
-    spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false }, watch: { type: 'bool', default: false } },
+    spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false }, watch: { type: 'bool', default: false }, tunnel: { type: 'bool', default: false }, port: { type: 'int' }, host: { type: 'string', default: '127.0.0.1' } },
     help: `aegis scan — trigger a full site scan (tests auto-generate afterwards)
 
-Usage: aegis scan [--url <baseUrl>] [--watch] [--token <t>] [--api <base>]
+Usage:
+  aegis scan [--url <baseUrl>] [--watch]
+  aegis scan --tunnel --port <port>          # scan a LOCAL app through a tunnel
 
-  --url <u>   Base URL to scan (default: the project's configured base URL)
-  --watch     Stream live progress (crawl + test generation) until it finishes.
-              Exit 0 when done, 1 if the scan failed.
+  --url <u>    Base URL to scan (default: the project's configured base URL)
+  --watch      Stream live progress (crawl + test generation) until it finishes.
+               Exit 0 when done, 1 if the scan failed.
+  --tunnel     Open a tunnel to your local app, scan it, and watch — all in ONE
+               process, so the tunnel stays alive for the whole scan. Needs --port.
+  --port <p>   Local port your app runs on (with --tunnel, e.g. 3000).
 
-Without --watch the scan fires and returns; follow it on the dashboard.`,
+Without --watch/--tunnel the scan fires and returns; follow it on the dashboard.`,
     fn: cmdScan,
   },
   'mobile-scan': {
@@ -238,6 +243,7 @@ async function cmdRun(opts) {
 }
 
 async function cmdScan(opts) {
+  if (opts.tunnel) return await cmdScanViaTunnel(opts);
   const body = { crawl: true };
   if (opts.url) body.baseUrl = opts.url;
   const res = await client(opts).trigger(body);
@@ -261,32 +267,78 @@ async function watchScan(opts, crawlId) {
     if (tty) process.stderr.write('\r\x1b[2K  ' + s);
     else if (force || Date.now() - lastPlain > 12000) { log('  ' + s); lastPlain = Date.now(); }
   };
-  await streamScanEvents({
-    api: opts.api || process.env.AEGIS_API,
-    token: opts.token || process.env.AEGIS_TOKEN,
-    crawlId,
-    onEvent: (event, d) => {
-      d = d || {};
-      if (event === 'crawl_progress') {
-        show(`crawling · ${d.pagesFound ?? '?'} page(s) found`);
-      } else if (event === 'ai_generation_progress') {
-        const ph = d.phase_label || d.phase || 'generating tests';
-        show(`${ph}${d.progress != null ? ' · ' + d.progress + '%' : ''}`, ph !== lastPhase);
-        lastPhase = ph;
-      } else if (event === 'done') {
-        if (tty) process.stderr.write('\n');
-        result = d.result; return true;
-      } else if (event === 'timeout') {
-        if (tty) process.stderr.write('\n');
-        result = 'timeout'; return true;
-      }
-    },
-  });
+  const onEvent = (event, d) => {
+    d = d || {};
+    if (event === 'crawl_progress') {
+      show(`crawling · ${d.pagesFound ?? '?'} page(s) found`);
+    } else if (event === 'ai_generation_progress') {
+      const ph = d.phase_label || d.phase || 'generating tests';
+      show(`${ph}${d.progress != null ? ' · ' + d.progress + '%' : ''}`, ph !== lastPhase);
+      lastPhase = ph;
+    } else if (event === 'done') {
+      if (tty) process.stderr.write('\n');
+      result = d.result; return true;
+    } else if (event === 'timeout') {
+      if (tty) process.stderr.write('\n');
+      result = 'timeout'; return true;
+    }
+  };
+  // Reconnect if the stream drops before a terminal event — the scan is still
+  // running (common when this same process is also forwarding tunnel traffic).
+  // The backend replays current status on connect and sends `done` immediately
+  // if the scan finished during the gap, so reconnecting can't miss the ending.
+  const deadline = Date.now() + 35 * 60 * 1000;
+  while (result === null && Date.now() < deadline) {
+    try {
+      await streamScanEvents({ api: opts.api || process.env.AEGIS_API, token: opts.token || process.env.AEGIS_TOKEN, crawlId, onEvent });
+    } catch { /* connection error — reconnect */ }
+    if (result === null) await new Promise((r) => setTimeout(r, 2000));
+  }
   if (result === 'completed') { log('✓ Scan complete — pages crawled and tests generated.'); return 0; }
   if (result === 'failed') { log('Scan failed — check the dashboard.'); return 1; }
   if (result === 'timeout') { log('Scan still running after 30 min — check the dashboard.'); return 0; }
-  log('Live stream closed before completion — check the dashboard.');
+  log('Live updates ended — check the dashboard for the final result.');
   return 0;
+}
+
+// aegis scan --tunnel --port <p>: open a tunnel to the local app, scan the URL
+// it hands back, and watch — all in ONE process. The tunnel's poll loop runs
+// concurrently with the scan, so it stays connected for the whole crawl (no
+// two-terminal juggling, no dropped tunnel, no URL to copy).
+async function cmdScanViaTunnel(opts) {
+  if (!opts.port) throw new UsageError('Usage: aegis scan --tunnel --port <port>  (e.g. --port 3000)');
+  const token = opts.token || process.env.AEGIS_TOKEN;
+  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const { runTunnel } = await import('../lib/tunnel.mjs');
+  const ac = new AbortController();
+  let exitCode = 2;
+  await runTunnel({
+    api: opts.api || process.env.AEGIS_API,
+    token,
+    port: opts.port,
+    host: opts.host || '127.0.0.1',
+    log,
+    signal: ac.signal,
+    onReady: async (publicUrl) => {
+      try {
+        log(`Scanning your local app (port ${opts.port}) through the tunnel…`);
+        const res = await client(opts).trigger({ crawl: true, baseUrl: publicUrl });
+        if (res.status === 'crawl_failed') {
+          log(`Scan failed to start: ${res.error ?? 'unknown error'}`);
+          exitCode = 2;
+        } else {
+          log(`Scan started (crawl ${res.crawl_id ?? '?'}).`);
+          exitCode = res.crawl_id ? await watchScan(opts, res.crawl_id) : 2;
+        }
+      } catch (e) {
+        log(`Scan error: ${e.message}`);
+        exitCode = 2;
+      } finally {
+        ac.abort(); // scan finished → stop the tunnel so the process exits
+      }
+    },
+  });
+  return exitCode;
 }
 
 async function cmdMobileScan(opts) {
