@@ -126,8 +126,9 @@ Drive AegisRunner from any CI pipeline with the open-source [`@aegisrunner/cli`]
 npm install -g @aegisrunner/cli
 export AEGIS_TOKEN=aegis_xxxxxxxx        # a project CI trigger token
 
-aegis run --format junit --output results.xml   # run your suite, write JUnit for CI
-aegis scan --url https://staging.example.com     # re-scan after a deploy
+aegis run --format junit --output results.xml       # run your suite, write JUnit for CI
+aegis scan --url https://staging.example.com         # re-scan after a deploy
+aegis scan --url https://staging.example.com --watch # …and stream live progress until done
 aegis mobile-scan --platform android --role customer
 ```
 
