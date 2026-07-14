@@ -25,6 +25,8 @@
   <a href="https://github.com/Aegis-Runner/AegisRunner/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" /></a>
   <a href="https://www.producthunt.com/products/aegisrunner"><img src="https://img.shields.io/badge/Product%20Hunt-AegisRunner-orange?style=flat-square&logo=producthunt" alt="Product Hunt" /></a>
   <a href="https://www.g2.com/products/aegisrunner/reviews"><img src="https://img.shields.io/badge/G2-Review%20Us-red?style=flat-square" alt="G2" /></a>
+  <a href="https://www.npmjs.com/package/@aegisrunner/cli"><img src="https://img.shields.io/npm/v/@aegisrunner/cli?style=flat-square&logo=npm&label=%40aegisrunner%2Fcli" alt="npm" /></a>
+  <a href="https://hub.docker.com/r/aegisrunner1/runner"><img src="https://img.shields.io/docker/image-size/aegisrunner1/runner/latest?style=flat-square&logo=docker&label=runner" alt="Docker image" /></a>
 </p>
 
 ---
@@ -113,6 +115,40 @@ Tested against real-world production websites — zero manual test authoring, fu
 - SSO/SAML support
 - API testing (REST endpoints with JSON assertions)
 - Billing via Paddle (Starter $9/mo, Pro $29/mo, Business $79/mo)
+
+---
+
+## CLI & self-hosted runner
+
+Drive AegisRunner from any CI pipeline with the open-source [`@aegisrunner/cli`](https://www.npmjs.com/package/@aegisrunner/cli) — zero dependencies, Node 18+:
+
+```bash
+npm install -g @aegisrunner/cli
+export AEGIS_TOKEN=aegis_xxxxxxxx        # a project CI trigger token
+
+aegis run --format junit --output results.xml   # run your suite, write JUnit for CI
+aegis scan --url https://staging.example.com     # re-scan after a deploy
+aegis mobile-scan --platform android --role customer
+```
+
+Exit code `0` = passed, `1` = test failures (fails the pipeline step), `2` = error.
+
+### Testing behind a firewall
+
+Targets the cloud can't reach — a VPN, `localhost`, or an IP-restricted staging box — are covered by the same CLI:
+
+```bash
+# expose a local dev app to the cloud scanner (temporary, encrypted)
+aegis tunnel --port 3000
+
+# or run a self-hosted runner INSIDE your network (outbound-only, no inbound port)
+docker run --network host -e AEGIS_TOKEN=aegis_xxx aegisrunner1/runner
+#   also on GHCR: ghcr.io/aegis-runner/runner
+```
+
+Full guide: [`cli/RUNNER.md`](cli/RUNNER.md) · [docs → Testing behind a firewall](https://aegisrunner.com/docs/testing-behind-a-firewall)
+
+The CLI and runner source live in [`cli/`](cli/) and are MIT-licensed.
 
 ---
 

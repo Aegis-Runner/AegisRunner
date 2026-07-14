@@ -1,0 +1,35 @@
+{
+  "name": "@aegisrunner/cli",
+  "version": "1.0.3",
+  "description": "AegisRunner CLI — trigger test runs, scans and mobile scans from CI. Zero dependencies.",
+  "type": "module",
+  "bin": {
+    "aegis": "./bin/aegis.mjs"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "testing",
+    "ci",
+    "e2e",
+    "regression",
+    "junit",
+    "aegisrunner"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aegis-Runner/AegisRunner.git",
+    "directory": "cli"
+  },
+  "homepage": "https://aegisrunner.com",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Aegis-Runner/AegisRunner/issues"
+  }
+}
