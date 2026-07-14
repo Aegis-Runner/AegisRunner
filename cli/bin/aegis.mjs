@@ -55,14 +55,16 @@ Exit codes: 0 all passed · 1 test failures · 2 error/timeout/cancelled`,
     fn: cmdRun,
   },
   scan: {
-    spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false } },
+    spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false }, watch: { type: 'bool', default: false } },
     help: `aegis scan — trigger a full site scan (tests auto-generate afterwards)
 
-Usage: aegis scan [--url <baseUrl>] [--token <t>] [--api <base>]
+Usage: aegis scan [--url <baseUrl>] [--watch] [--token <t>] [--api <base>]
 
   --url <u>   Base URL to scan (default: the project's configured base URL)
+  --watch     Stream live progress (crawl + test generation) until it finishes.
+              Exit 0 when done, 1 if the scan failed.
 
-Note: scan progress is not pollable with a CI token — watch it on the dashboard.`,
+Without --watch the scan fires and returns; follow it on the dashboard.`,
     fn: cmdScan,
   },
   'mobile-scan': {
@@ -245,7 +247,45 @@ async function cmdScan(opts) {
   }
   log(`Scan started (crawl ${res.crawl_id ?? '?'}).`);
   if (res.dashboardUrl) log(`Watch it: ${res.dashboardUrl}`);
-  if (opts.wait) log('Note: --wait is not supported for scans (CI tokens cannot poll scan status).');
+  if ((opts.watch || opts.wait) && res.crawl_id) return await watchScan(opts, res.crawl_id);
+  return 0;
+}
+
+// Follow a scan to completion over SSE (GET /ci/crawls/:id/events): rewrite a
+// single progress line on TTYs, throttle to periodic lines in CI logs.
+async function watchScan(opts, crawlId) {
+  const { streamScanEvents } = await import('../lib/api.mjs');
+  const tty = process.stderr.isTTY;
+  let result = null, lastPlain = 0, lastPhase = '';
+  const show = (s, force) => {
+    if (tty) process.stderr.write('\r\x1b[2K  ' + s);
+    else if (force || Date.now() - lastPlain > 12000) { log('  ' + s); lastPlain = Date.now(); }
+  };
+  await streamScanEvents({
+    api: opts.api || process.env.AEGIS_API,
+    token: opts.token || process.env.AEGIS_TOKEN,
+    crawlId,
+    onEvent: (event, d) => {
+      d = d || {};
+      if (event === 'crawl_progress') {
+        show(`crawling · ${d.pagesFound ?? '?'} page(s) found`);
+      } else if (event === 'ai_generation_progress') {
+        const ph = d.phase_label || d.phase || 'generating tests';
+        show(`${ph}${d.progress != null ? ' · ' + d.progress + '%' : ''}`, ph !== lastPhase);
+        lastPhase = ph;
+      } else if (event === 'done') {
+        if (tty) process.stderr.write('\n');
+        result = d.result; return true;
+      } else if (event === 'timeout') {
+        if (tty) process.stderr.write('\n');
+        result = 'timeout'; return true;
+      }
+    },
+  });
+  if (result === 'completed') { log('✓ Scan complete — pages crawled and tests generated.'); return 0; }
+  if (result === 'failed') { log('Scan failed — check the dashboard.'); return 1; }
+  if (result === 'timeout') { log('Scan still running after 30 min — check the dashboard.'); return 0; }
+  log('Live stream closed before completion — check the dashboard.');
   return 0;
 }
 

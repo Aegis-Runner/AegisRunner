@@ -43,6 +43,51 @@ export function makeClient({ api, token }) {
   };
 }
 
+// Stream live scan progress (crawl + AI test-gen) as Server-Sent Events from
+// GET /ci/crawls/:id/events. Invokes onEvent(event, data) per frame; return
+// true from onEvent to stop early. Resolves when the stream ends. Zero-dep —
+// uses Node 18+ fetch streaming, no SSE library.
+export async function streamScanEvents({ api, token, crawlId, onEvent }) {
+  const base = (api || DEFAULT_API).replace(/\/+$/, '');
+  let res;
+  try {
+    res = await fetch(`${base}/ci/crawls/${encodeURIComponent(crawlId)}/events`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+    });
+  } catch (err) {
+    throw new ApiError(0, `Cannot reach ${base}: ${err.cause?.message || err.message}`);
+  }
+  if (!res.ok || !res.body) {
+    throw new ApiError(res.status, `live updates unavailable (HTTP ${res.status})`);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    let chunk;
+    try { chunk = await reader.read(); } catch { break; }
+    if (chunk.done) break;
+    buf += dec.decode(chunk.value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      if (!frame || frame.startsWith(':')) continue; // keepalive comment
+      let event = 'message', data = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      let payload = null;
+      if (data) { try { payload = JSON.parse(data); } catch { /* keep null */ } }
+      if (onEvent(event, payload) === true) {
+        try { await reader.cancel(); } catch { /* ignore */ }
+        return;
+      }
+    }
+  }
+}
+
 // Poll GET /ci/runs/:id until isFinished, with a single rewriting progress
 // line on TTYs (CI logs get one line per poll-minute instead, to avoid \r spam).
 export async function pollRun(client, runId, { timeoutSec, intervalMs = 5000, log }) {

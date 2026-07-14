@@ -52,15 +52,20 @@ Exit codes: **0** all passed · **1** test failures · **2** error / timeout / c
   on the linked dashboard run page.
 
 `--crawl` scans the site first and generates tests from what it finds; the
-command returns immediately in that mode (scan progress isn't pollable with a
-CI token — watch the printed dashboard link).
+command returns immediately in that mode. Add `--watch` to stream live crawl +
+test-generation progress until it finishes (or open the printed dashboard link).
 
 ### `aegis scan` — trigger a full site scan
 
 ```bash
 aegis scan                                            # project's configured base URL
 aegis scan --url https://staging.example.com          # must be on the project's domain
+aegis scan --url https://staging.example.com --watch  # stream live progress until done
 ```
+
+With `--watch` the CLI streams crawl and test-generation progress live (over
+Server-Sent Events) and exits 0 when the scan completes, 1 if it failed —
+handy for a CI step that should block on the scan and its generated tests.
 
 ### `aegis mobile-scan` — on-device mobile app scan (fire-and-forget)
 
