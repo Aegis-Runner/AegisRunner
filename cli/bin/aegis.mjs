@@ -244,6 +244,12 @@ async function cmdRun(opts) {
 
 async function cmdScan(opts) {
   if (opts.tunnel) return await cmdScanViaTunnel(opts);
+  // Guard the empty-string footgun: `--url ""` (e.g. a capture script that
+  // grabbed nothing) would otherwise be falsy and silently fall back to the
+  // project's default URL — mis-targeting the scan. Fail loudly instead.
+  if (opts.url !== undefined && String(opts.url).trim() === '') {
+    throw new UsageError("--url is empty. Pass a real URL (e.g. https://staging.example.com), or omit --url to scan the project's configured URL.");
+  }
   const body = { crawl: true };
   if (opts.url) body.baseUrl = opts.url;
   const res = await client(opts).trigger(body);
