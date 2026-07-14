@@ -68,6 +68,31 @@ With `--watch` the CLI streams crawl and test-generation progress live (over
 Server-Sent Events) and exits 0 when the scan completes, 1 if it failed —
 handy for a CI step that should block on the scan and its generated tests.
 
+**Scanning behind a login.** To test pages that require signing in, hand the
+scan a login and it will authenticate during the crawl:
+
+```bash
+# username + password (password from stdin, never on the command line)
+printf %s "$STAGING_PW" | aegis scan --username qa@example.com --password-stdin --watch
+
+# or provide the password via an env var instead of stdin
+AEGIS_PASSWORD="$STAGING_PW" aegis scan --username qa@example.com --watch
+
+# or scan as a role whose login you've already saved in the project
+aegis scan --role Admin --watch
+```
+
+| Flag | What it does |
+|------|--------------|
+| `--username <u>` | Login identity — **email, username, phone, employee id, anything**. The scanner's AI maps it onto whatever the login form actually calls its identity field, so there's nothing to configure per app. |
+| `--password-stdin` | Reads the password from stdin. Recommended — keeps it out of your shell history and `ps`. Or set `AEGIS_PASSWORD` instead. |
+| `--role <name>` | Scan as a saved role (Admin / Buyer / …). Uses that role's stored login (no `--username`/password needed) and tags the scan + its generated tests with the role. |
+
+> The CLI never accepts a password as a plain flag (a `--password <p>` would leak
+> through `ps` and shell history) — use `--password-stdin` or `AEGIS_PASSWORD`.
+> Credentials sent this way are saved to the project's login so authenticated
+> **test runs** and re-scans can sign in too. Works with `--tunnel` and `--url`.
+
 ### `aegis mobile-scan` — on-device mobile app scan (fire-and-forget)
 
 ```bash

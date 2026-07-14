@@ -130,6 +130,9 @@ aegis run --format junit --output results.xml       # run your suite, write JUni
 aegis scan --url https://staging.example.com         # re-scan after a deploy
 aegis scan --url https://staging.example.com --watch # …and stream live progress until done
 aegis mobile-scan --platform android --role customer
+
+# scan pages behind a login (password from stdin — never on the command line):
+printf %s "$STAGING_PW" | aegis scan --username qa@example.com --password-stdin --watch
 ```
 
 Exit code `0` = passed, `1` = test failures (fails the pipeline step), `2` = error.

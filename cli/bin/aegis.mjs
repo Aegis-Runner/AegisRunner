@@ -55,19 +55,31 @@ Exit codes: 0 all passed · 1 test failures · 2 error/timeout/cancelled`,
     fn: cmdRun,
   },
   scan: {
-    spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false }, watch: { type: 'bool', default: false }, tunnel: { type: 'bool', default: false }, port: { type: 'int' }, host: { type: 'string', default: '127.0.0.1' } },
+    spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false }, watch: { type: 'bool', default: false }, tunnel: { type: 'bool', default: false }, port: { type: 'int' }, host: { type: 'string', default: '127.0.0.1' }, role: { type: 'string' }, username: { type: 'string' }, passwordStdin: { type: 'bool', default: false } },
     help: `aegis scan — trigger a full site scan (tests auto-generate afterwards)
 
 Usage:
   aegis scan [--url <baseUrl>] [--watch]
   aegis scan --tunnel --port <port>          # scan a LOCAL app through a tunnel
+  aegis scan --username <u> --password-stdin # scan behind a login
 
-  --url <u>    Base URL to scan (default: the project's configured base URL)
-  --watch      Stream live progress (crawl + test generation) until it finishes.
-               Exit 0 when done, 1 if the scan failed.
-  --tunnel     Open a tunnel to your local app, scan it, and watch — all in ONE
-               process, so the tunnel stays alive for the whole scan. Needs --port.
-  --port <p>   Local port your app runs on (with --tunnel, e.g. 3000).
+  --url <u>          Base URL to scan (default: the project's configured base URL)
+  --watch            Stream live progress (crawl + test generation) until it finishes.
+                     Exit 0 when done, 1 if the scan failed.
+  --tunnel           Open a tunnel to your local app, scan it, and watch — all in ONE
+                     process, so the tunnel stays alive for the whole scan. Needs --port.
+  --port <p>         Local port your app runs on (with --tunnel, e.g. 3000).
+
+Sign in during the scan (so pages behind a login get tested):
+  --username <u>     Login identity — email, username, phone, whatever the form uses.
+                     The scanner maps it onto the form's fields for you (no field
+                     names to configure). Pair with a password (below).
+  --password-stdin   Read the password from stdin (recommended — keeps it out of your
+                     shell history and 'ps'):  printf %s "$PW" | aegis scan --username me@x.com --password-stdin
+                     Or set the AEGIS_PASSWORD env var instead of this flag.
+  --role <name>      Scan as a saved role (Admin / Buyer / …). Uses that role's stored
+                     login — no --username/password needed — and tags the scan + its
+                     tests with the role.
 
 Without --watch/--tunnel the scan fires and returns; follow it on the dashboard.`,
     fn: cmdScan,
@@ -242,6 +254,44 @@ async function cmdRun(opts) {
   return exitCodeFor(run);
 }
 
+// Read all of stdin (used for --password-stdin so the password never lands in
+// argv / shell history / `ps`). Strips a single trailing newline.
+function readStdin() {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (c) => { data += c; });
+    process.stdin.on('end', () => resolve(data.replace(/\r?\n$/, '')));
+    process.stdin.on('error', reject);
+  });
+}
+
+// Build the auth fragment of the scan trigger body from --role / --username /
+// --password-stdin / AEGIS_PASSWORD. The scanner's AI login maps `username`
+// onto whatever the form calls its identity field (email / username / phone /
+// …), so there's nothing to configure per-app. A password is NEVER read from
+// argv — `--password <p>` would leak via `ps` and shell history — only from
+// stdin or the AEGIS_PASSWORD env var.
+async function resolveScanAuth(opts) {
+  const body = {};
+  const role = opts.role && String(opts.role).trim();
+  if (role) body.authRole = role;
+  const username = opts.username && String(opts.username).trim();
+  let password;
+  if (opts.passwordStdin) {
+    password = await readStdin();
+    if (!password) throw new UsageError('--password-stdin was set but stdin was empty. Pipe the password in, e.g.  printf %s "$PW" | aegis scan --username me@example.com --password-stdin');
+  } else if (process.env.AEGIS_PASSWORD) {
+    password = process.env.AEGIS_PASSWORD;
+  }
+  if (username || password) {
+    if (!username) throw new UsageError('A password was provided but no --username. Add --username <email-or-username>.');
+    if (!password) throw new UsageError('--username needs a password. Set AEGIS_PASSWORD=… or add --password-stdin (never put the password on the command line).');
+    body.credentials = { username, password };
+  }
+  return body;
+}
+
 async function cmdScan(opts) {
   if (opts.tunnel) return await cmdScanViaTunnel(opts);
   // Guard the empty-string footgun: `--url ""` (e.g. a capture script that
@@ -252,6 +302,7 @@ async function cmdScan(opts) {
   }
   const body = { crawl: true };
   if (opts.url) body.baseUrl = opts.url;
+  Object.assign(body, await resolveScanAuth(opts));
   const res = await client(opts).trigger(body);
   if (res.status === 'crawl_failed') {
     log(`Scan failed to start: ${res.error ?? 'unknown error'}`);
@@ -315,6 +366,10 @@ async function cmdScanViaTunnel(opts) {
   if (!opts.port) throw new UsageError('Usage: aegis scan --tunnel --port <port>  (e.g. --port 3000)');
   const token = opts.token || process.env.AEGIS_TOKEN;
   if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  // Resolve auth BEFORE opening the tunnel: validates the flags and consumes
+  // --password-stdin up front, so a bad login or empty stdin fails fast instead
+  // of after the tunnel is live.
+  const auth = await resolveScanAuth(opts);
   const { runTunnel } = await import('../lib/tunnel.mjs');
   const ac = new AbortController();
   let exitCode = 2;
@@ -328,7 +383,7 @@ async function cmdScanViaTunnel(opts) {
     onReady: async (publicUrl) => {
       try {
         log(`Scanning your local app (port ${opts.port}) through the tunnel…`);
-        const res = await client(opts).trigger({ crawl: true, baseUrl: publicUrl });
+        const res = await client(opts).trigger({ crawl: true, baseUrl: publicUrl, ...auth });
         if (res.status === 'crawl_failed') {
           log(`Scan failed to start: ${res.error ?? 'unknown error'}`);
           exitCode = 2;
