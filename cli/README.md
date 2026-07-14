@@ -13,8 +13,8 @@ Or run without installing: `npx @aegisrunner/cli ...`, or `node bin/aegis.mjs ..
 
 ## Auth
 
-Create a **CI trigger token** in your project (**Manage → CI/CD**; any plan,
-project admins). Pass it with `--token aegis_...` or set it once:
+Create a **CI trigger token** in your project (**Manage → CI/CD**; Pro or
+Business plan). Pass it with `--token aegis_...` or set it once:
 
 ```bash
 export AEGIS_TOKEN=aegis_xxxxxxxx

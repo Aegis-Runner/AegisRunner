@@ -40,8 +40,8 @@ aegis runner            # reads AEGIS_TOKEN from the environment
 
 ## Get a token
 
-Create a **CI trigger token** in AegisRunner: **Manage → CI/CD** (any plan,
-project admins). The runner is scoped to that token's project.
+Create a **CI trigger token** in AegisRunner: **Manage → CI/CD** (Pro or
+Business plan). The runner is scoped to that token's project.
 
 ```bash
 export AEGIS_TOKEN=aegis_xxxxxxxx

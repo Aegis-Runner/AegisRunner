@@ -1,6 +1,6 @@
 {
   "name": "@aegisrunner/cli",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "AegisRunner CLI — trigger test runs, scans and mobile scans from CI. Zero dependencies.",
   "type": "module",
   "bin": {
