@@ -1,0 +1,44 @@
+{
+  "name": "@aegisrunner/nuxt",
+  "version": "0.1.0",
+  "description": "Nuxt module that attaches AegisRunner to your dev server — scan your localhost app with AI, no deploy. Tunnel + one-keypress scan + a DevTools tab.",
+  "type": "module",
+  "main": "./module.mjs",
+  "exports": {
+    ".": "./module.mjs"
+  },
+  "files": [
+    "module.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "nuxt": "^3.0.0 || ^4.0.0"
+  },
+  "dependencies": {
+    "@aegisrunner/cli": "^1.0.10",
+    "@nuxt/kit": "^3.0.0"
+  },
+  "keywords": [
+    "nuxt",
+    "nuxt-module",
+    "testing",
+    "e2e",
+    "regression",
+    "ai-testing",
+    "aegisrunner",
+    "localhost"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aegis-Runner/AegisRunner.git",
+    "directory": "nuxt"
+  },
+  "homepage": "https://aegisrunner.com",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Aegis-Runner/AegisRunner/issues"
+  }
+}
