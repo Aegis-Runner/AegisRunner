@@ -124,6 +124,23 @@ Everything after `--` is your dev command, run verbatim (`npm run dev`,
 `pnpm dev`, `vite`, `next dev`, …). This is the primitive the framework plugins
 wrap so you don't even type it.
 
+### `aegis hooks` — gate `git push` on AegisRunner
+
+Install a **pre-push** git hook that runs AegisRunner before your code leaves the
+machine and **blocks the push** if it fails.
+
+```bash
+aegis hooks install                          # gate = aegis run --wait (your suite)
+aegis hooks install --cmd "aegis run --strategy smoke --wait"
+aegis hooks uninstall
+```
+
+Opt-in by design — nothing is written until you run it. An existing `pre-push`
+hook is **backed up** (`pre-push.pre-aegis`), never clobbered, and restored on
+uninstall. The hook runs in your repo on `git push` and exits non-zero to stop
+the push. It needs `AEGIS_TOKEN` in your environment. (This is the explicit form
+of the framework plugins' `scanOn: 'commit'`.)
+
 ### `aegis mobile-scan` — on-device mobile app scan (fire-and-forget)
 
 ```bash

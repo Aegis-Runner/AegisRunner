@@ -145,6 +145,21 @@ Usage:
 While it runs:  [a] scan · [o] open results · [q] quit`,
     fn: cmdDev,
   },
+  hooks: {
+    spec: { ...COMMON, cmd: { type: 'string' } },
+    help: `aegis hooks — gate 'git push' on AegisRunner (a pre-push hook).
+
+Usage:
+  aegis hooks install [--cmd "<command>"]   # add the gate (default: aegis run --wait)
+  aegis hooks uninstall                       # remove it
+
+On 'git push' the hook runs the command in your repo and BLOCKS the push if it
+exits non-zero — so a failing suite stops code before it leaves your machine.
+Opt-in: nothing is installed until you run this, and an existing pre-push hook
+is backed up (…pre-push.pre-aegis), not clobbered. The hook needs AEGIS_TOKEN in
+your environment.`,
+    fn: cmdHooks,
+  },
   runner: {
     spec: { ...COMMON },
     help: `aegis runner — run a self-hosted runner inside your own network.
@@ -532,6 +547,57 @@ async function cmdDev(opts, positional) {
   process.on('SIGTERM', () => shutdown(0));
 
   await new Promise(() => {}); // keep the process alive; shutdown() exits explicitly
+}
+
+// aegis hooks install|uninstall — a git pre-push gate. Opt-in (never installed
+// silently), marker-guarded, and it backs up any existing pre-push hook rather
+// than clobbering it. Resolves the spec's `scanOn: 'commit'` without surprising
+// anyone with a silent hook write.
+const AEGIS_HOOK_MARK = '# >>> aegisrunner pre-push gate >>>';
+async function cmdHooks(opts, positional) {
+  const action = String((positional || [])[0] || '').toLowerCase();
+  const fs = await import('node:fs');
+  const { join } = await import('node:path');
+  const { execSync } = await import('node:child_process');
+
+  let gitDir;
+  try { gitDir = execSync('git rev-parse --git-dir', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+  catch { throw new UsageError('Not a git repository — run this from inside your repo.'); }
+  const hooksDir = join(gitDir, 'hooks');
+  const hookPath = join(hooksDir, 'pre-push');
+  const backup = hookPath + '.pre-aegis';
+
+  if (action === 'install') {
+    const cmd = opts.cmd || 'aegis run --wait';
+    fs.mkdirSync(hooksDir, { recursive: true });
+    if (fs.existsSync(hookPath)) {
+      const cur = fs.readFileSync(hookPath, 'utf8');
+      if (cur.includes(AEGIS_HOOK_MARK)) log('An AegisRunner pre-push gate is already installed — reinstalling.');
+      else { fs.renameSync(hookPath, backup); log('Backed up your existing pre-push hook → pre-push.pre-aegis'); }
+    }
+    const script = `#!/bin/sh\n${AEGIS_HOOK_MARK}\n`
+      + `# Installed by \`aegis hooks install\`. Remove with \`aegis hooks uninstall\`.\n`
+      + `# Blocks 'git push' when the command below exits non-zero.\n`
+      + `${cmd}\n`
+      + `# <<< aegisrunner pre-push gate <<<\n`;
+    fs.writeFileSync(hookPath, script);
+    fs.chmodSync(hookPath, 0o755);
+    log(`✓ Installed a pre-push gate at ${hookPath}`);
+    log(`  runs:   ${cmd}`);
+    log('  needs:  AEGIS_TOKEN in your environment · remove with: aegis hooks uninstall');
+    return 0;
+  }
+  if (action === 'uninstall') {
+    if (!fs.existsSync(hookPath)) { log('No pre-push hook found — nothing to remove.'); return 0; }
+    if (!fs.readFileSync(hookPath, 'utf8').includes(AEGIS_HOOK_MARK)) {
+      log('The pre-push hook was not installed by AegisRunner — leaving it alone.'); return 0;
+    }
+    fs.unlinkSync(hookPath);
+    if (fs.existsSync(backup)) { fs.renameSync(backup, hookPath); log('Restored your previous pre-push hook.'); }
+    log('✓ Removed the AegisRunner pre-push gate.');
+    return 0;
+  }
+  throw new UsageError('Usage: aegis hooks install [--cmd "<command>"] | aegis hooks uninstall');
 }
 
 async function cmdMobileScan(opts) {
