@@ -18,6 +18,9 @@ export function parseArgs(argv, spec) {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    // `--` ends flag parsing: everything after is raw positional (the child
+    // command for `aegis dev -- npm run dev`). Standard POSIX convention.
+    if (arg === '--') { for (let j = i + 1; j < argv.length; j++) positional.push(argv[j]); break; }
     if (!arg.startsWith('--')) { positional.push(arg); continue; }
     // --flag=value form
     const eq = arg.indexOf('=');

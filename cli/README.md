@@ -93,6 +93,37 @@ aegis scan --role Admin --watch
 > Credentials sent this way are saved to the project's login so authenticated
 > **test runs** and re-scans can sign in too. Works with `--tunnel` and `--url`.
 
+### `aegis dev` — run your dev server with AegisRunner attached
+
+Wraps your normal dev command. It starts your dev server, opens a tunnel to it,
+and keeps that tunnel alive for the whole session — so a full AI scan of your
+**localhost** app is one keypress away, without a second terminal or a URL to copy.
+
+```bash
+aegis dev --port 3000 -- npm run dev
+```
+
+```text
+listening on http://localhost:3000
+
+  ◆ aegis   dev server on :3000 — opening tunnel…
+  ◆ aegis   tunnel open → https://ab12cd.tunnel.aegisrunner.com
+  ◆ aegis   press [a] scan · [o] open results · [q] quit
+```
+
+While it runs: **`[a]`** scans your local app and streams progress live, **`[o]`**
+opens the dashboard, **`[q]`** quits (and closes the tunnel).
+
+- `--port <p>` — the port your dev server listens on. Omit it and `aegis dev`
+  sniffs the port from your dev server's output (best effort).
+- `--scan-on startup` — scan once automatically as soon as the tunnel opens
+  (default is `manual` — you press `[a]`).
+- `--host`, `--token`, `--api` — as elsewhere. Needs a Pro/Business CI token.
+
+Everything after `--` is your dev command, run verbatim (`npm run dev`,
+`pnpm dev`, `vite`, `next dev`, …). This is the primitive the framework plugins
+wrap so you don't even type it.
+
 ### `aegis mobile-scan` — on-device mobile app scan (fire-and-forget)
 
 ```bash

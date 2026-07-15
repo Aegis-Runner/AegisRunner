@@ -126,6 +126,25 @@ Usage: aegis tunnel --port <port> [--host <host>] [--token <t>] [--api <base>]
 Prints a public URL — point a scan at it, then press Ctrl-C when done.`,
     fn: cmdTunnel,
   },
+  dev: {
+    spec: { ...COMMON, port: { type: 'int' }, host: { type: 'string', default: '127.0.0.1' }, scanOn: { type: 'string', default: 'manual' } },
+    help: `aegis dev — run your dev server with AegisRunner attached. Opens a tunnel to your
+local app and lets you scan it on a keypress, without leaving your terminal.
+
+Usage:
+  aegis dev [--port <p>] -- <your dev command>
+  e.g.  aegis dev --port 3000 -- npm run dev
+
+  --port <p>     Port your dev server listens on. If omitted, aegis dev sniffs it
+                 from the dev server's output (best effort).
+  --host <h>     Local host to forward to (default 127.0.0.1)
+  --scan-on <w>  'manual' (default — press [a] to scan) or 'startup' (scan once
+                 as soon as the tunnel opens)
+  --token <t>    CI trigger token (or env AEGIS_TOKEN). Pro or Business plan.
+
+While it runs:  [a] scan · [o] open results · [q] quit`,
+    fn: cmdDev,
+  },
   runner: {
     spec: { ...COMMON },
     help: `aegis runner — run a self-hosted runner inside your own network.
@@ -400,6 +419,119 @@ async function cmdScanViaTunnel(opts) {
     },
   });
   return exitCode;
+}
+
+// aegis dev -- <cmd>: run the dev server AND keep a tunnel open to it for the
+// whole session, so a full AI scan is one keypress away — no second terminal,
+// no URL to copy. The universal primitive the framework plugins wrap.
+async function cmdDev(opts, positional) {
+  const childCmd = (positional || []).filter(Boolean);
+  if (childCmd.length === 0) {
+    throw new UsageError('Usage: aegis dev [--port <p>] -- <your dev command>\n  e.g.  aegis dev --port 3000 -- npm run dev');
+  }
+  const token = opts.token || process.env.AEGIS_TOKEN;
+  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+
+  const { spawn } = await import('node:child_process');
+  const { runTunnel } = await import('../lib/tunnel.mjs');
+  const win = process.platform === 'win32';
+
+  // Own stdin (for [a]/[o]/[q]); the child gets its own process group on Unix so
+  // we can kill the whole tree (npm → node …) cleanly on exit.
+  const child = spawn(childCmd[0], childCmd.slice(1), {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: win,          // npm/pnpm/yarn resolve via the shell on Windows
+    detached: !win,
+    env: process.env,
+  });
+
+  const ac = new AbortController();
+  let publicUrl = null, scanning = false, tunnelStarted = false, sniffBuf = '';
+
+  const printKeys = () => log('  \x1b[36m◆ aegis\x1b[0m   press [a] scan · [o] open results · [q] quit');
+
+  const runScan = async () => {
+    if (scanning) { log('  ◆ aegis   a scan is already running…'); return; }
+    if (!publicUrl) { log('  ◆ aegis   tunnel not ready yet — one moment.'); return; }
+    scanning = true;
+    try {
+      log('  \x1b[36m◆ aegis\x1b[0m   scanning your local app…');
+      const res = await client(opts).trigger({ crawl: true, baseUrl: publicUrl });
+      if (res.status === 'crawl_failed') log(`  ! aegis   scan failed to start: ${res.error ?? 'unknown error'}`);
+      else if (res.crawl_id) {
+        if (res.dashboardUrl) log(`  ◆ aegis   results: ${res.dashboardUrl}`);
+        await watchScan(opts, res.crawl_id);
+      }
+    } catch (e) { log(`  ! aegis   scan error: ${e.message}`); }
+    finally { scanning = false; printKeys(); }
+  };
+
+  const startTunnel = (port) => {
+    if (tunnelStarted) return;
+    tunnelStarted = true;
+    log(`\n  \x1b[36m◆ aegis\x1b[0m   dev server on :${port} — opening tunnel…`);
+    runTunnel({
+      api: opts.api || process.env.AEGIS_API, token,
+      port, host: opts.host || '127.0.0.1', log, signal: ac.signal,
+      onReady: (url) => {
+        publicUrl = url;
+        log(`  \x1b[36m◆ aegis\x1b[0m   tunnel open → ${url}`);
+        if (opts.scanOn === 'startup') runScan(); else printKeys();
+      },
+    }).catch((e) => log(`  ! aegis   tunnel error: ${e.message}`));
+  };
+
+  // No --port? sniff the dev server's own output for the port it bound to.
+  const sniffPort = (chunk) => {
+    if (tunnelStarted) return;
+    sniffBuf = (sniffBuf + chunk.toString()).slice(-16000);
+    const m = sniffBuf.match(/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{2,5})/i)
+           || sniffBuf.match(/https?:\/\/[^\s/'"]*:(\d{2,5})/i);
+    if (m) startTunnel(Number(m[1]));
+  };
+
+  // Re-emit the child's output verbatim (preserves colors/spinners); sniff it
+  // only when we weren't handed a --port.
+  child.stdout.on('data', (c) => { process.stdout.write(c); if (!opts.port) sniffPort(c); });
+  child.stderr.on('data', (c) => { process.stderr.write(c); if (!opts.port) sniffPort(c); });
+  if (opts.port) setTimeout(() => startTunnel(opts.port), 700); // give the server a moment to bind
+
+  let exiting = false;
+  const shutdown = (code = 0) => {
+    if (exiting) return; exiting = true;
+    ac.abort();
+    try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch {}
+    try { if (win) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); else process.kill(-child.pid, 'SIGTERM'); }
+    catch { try { child.kill(); } catch {} }
+    process.exit(code);
+  };
+
+  const openResults = () => {
+    const url = 'https://app.aegisrunner.com';
+    const opener = win ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+    const args = win ? ['/c', 'start', '', url] : [url];
+    try { spawn(opener, args, { stdio: 'ignore', detached: true }).unref(); log(`  ◆ aegis   opened ${url}`); }
+    catch { log(`  ◆ aegis   open ${url}`); }
+  };
+
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (key) => {
+      const k = key.toLowerCase();
+      if (k === 'a') runScan();
+      else if (k === 'o') openResults();
+      else if (k === 'q' || key === '') shutdown(0); // q or Ctrl-C
+    });
+  }
+
+  child.on('exit', (code) => { log('  ◆ aegis   dev server exited — closing tunnel.'); shutdown(code ?? 0); });
+  child.on('error', (e) => { log(`  ! aegis   could not start "${childCmd.join(' ')}": ${e.message}`); shutdown(1); });
+  process.on('SIGINT', () => shutdown(0));
+  process.on('SIGTERM', () => shutdown(0));
+
+  await new Promise(() => {}); // keep the process alive; shutdown() exits explicitly
 }
 
 async function cmdMobileScan(opts) {
