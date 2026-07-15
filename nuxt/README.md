@@ -2,7 +2,7 @@
 
 A [Nuxt](https://nuxt.com) module that attaches [AegisRunner](https://aegisrunner.com) to your dev server. Add it to `modules`, run `nuxt dev`, and an **AI scan of your localhost app is one keypress away** — no deploy, no staging URL, no second terminal.
 
-On startup the module learns your dev-server port, opens a secure **outbound-only** tunnel to it, and holds it for the session. Press **`a`** (or set `scanOn: 'startup'`) and AegisRunner crawls your running app, generates tests, and streams progress into your dev log. A **DevTools tab** links you to the results.
+On startup the module learns your dev-server port, opens a secure **outbound-only** tunnel to it, and holds it for the session. Press **`a`** (or set `scanOn: 'startup'`) and AegisRunner crawls your running app, generates tests, and streams progress into your dev log. A native **DevTools tab** shows live tunnel + scan status and a one-click **Scan now**.
 
 ## Install
 
@@ -41,6 +41,7 @@ npm run dev
 | `scanOn` | `'manual'` | `'manual'` — press `a`. `'startup'` — scan once when the tunnel opens. |
 | `port` | detected | Dev-server port. Auto-detected via the `listen` hook; override if needed. |
 | `host` | `'127.0.0.1'` | Local host the tunnel forwards to. |
+| `label` | package name | Shown in every log line as `ℹ aegis·<label>` — disambiguates tunnels when several dev servers run at once (monorepos). |
 | `api` | public API | `process.env.AEGIS_API` override. |
 
 The module is **dev-only** — it never runs in `nuxt build` or production. The tunnel, scan trigger and live-progress stream are reused from [`@aegisrunner/cli`](https://www.npmjs.com/package/@aegisrunner/cli), so the protocol and auth live in one place. Prefer no config change? [`aegis dev -- nuxt dev`](https://www.npmjs.com/package/@aegisrunner/cli) does the same thing.

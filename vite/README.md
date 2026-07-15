@@ -47,6 +47,7 @@ npm run dev
 | `scanOn` | `'manual'` | `'manual'` — press `a`. `'startup'` — scan once when the tunnel opens. |
 | `port` | detected | Dev-server port. Auto-detected from the running server; override if needed. |
 | `host` | `'127.0.0.1'` | Local host the tunnel forwards to. |
+| `label` | package name | Shown in every log line as `◆ aegis·<label>` — disambiguates tunnels when several dev servers run at once (monorepos / `turbo dev`). |
 | `api` | public API | `process.env.AEGIS_API` override. |
 
 The plugin is **dev-only** (`apply: 'serve'`) — it never runs during `vite build`. The tunnel, scan trigger and live-progress stream are reused from [`@aegisrunner/cli`](https://www.npmjs.com/package/@aegisrunner/cli), so the protocol and auth live in one place. Prefer the raw command? [`aegis dev -- vite`](https://www.npmjs.com/package/@aegisrunner/cli) does the same thing without a config change.

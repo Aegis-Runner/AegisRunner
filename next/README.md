@@ -42,6 +42,7 @@ npm run dev
 | `scanOn` | `'manual'` | `'manual'` — press `a`. `'startup'` — scan once when the tunnel opens. |
 | `port` | `-p` / `PORT` / `3000` | Dev-server port. Set it explicitly if you run on a non-standard port and don't pass `-p`. |
 | `host` | `'127.0.0.1'` | Local host the tunnel forwards to. |
+| `label` | package name | Shown in every log line as `◆ aegis·<label>` — disambiguates tunnels when several dev servers run at once (monorepos). |
 | `api` | public API | `process.env.AEGIS_API` override. |
 
 The wrapper is a **pure pass-through** in every phase except dev — it never runs in `next build` or production. The tunnel, scan trigger and live-progress stream are reused from [`@aegisrunner/cli`](https://www.npmjs.com/package/@aegisrunner/cli). Prefer no config change? [`aegis dev -- next dev`](https://www.npmjs.com/package/@aegisrunner/cli) is identical.
