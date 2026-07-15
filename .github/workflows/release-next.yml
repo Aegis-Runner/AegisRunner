@@ -1,0 +1,37 @@
+name: release-next
+
+# Publishes @aegisrunner/next on a `next-v*` tag:
+#   git tag next-v0.1.0 && git push origin next-v0.1.0
+#
+# Reuses the same NPM_TOKEN repo secret as the other release-* workflows.
+
+on:
+  push:
+    tags: ['next-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  npm:
+    name: Publish npm package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Pack tarball
+        run: npm pack
+      - name: Attach tarball to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: next/*.tgz

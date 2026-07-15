@@ -1,0 +1,43 @@
+{
+  "name": "@aegisrunner/next",
+  "version": "0.1.0",
+  "description": "Next.js config wrapper that attaches AegisRunner to your dev server — scan your localhost app with AI, no deploy.",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "next": ">=13"
+  },
+  "dependencies": {
+    "@aegisrunner/cli": "^1.0.10"
+  },
+  "keywords": [
+    "next",
+    "nextjs",
+    "testing",
+    "e2e",
+    "regression",
+    "ai-testing",
+    "aegisrunner",
+    "localhost"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aegis-Runner/AegisRunner.git",
+    "directory": "next"
+  },
+  "homepage": "https://aegisrunner.com",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Aegis-Runner/AegisRunner/issues"
+  }
+}
