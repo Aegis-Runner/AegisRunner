@@ -18,9 +18,18 @@ function forwardHeaders(h) {
 
 // Cap how long we wait on the LOCAL app before giving up on a single relayed
 // request. Without this, a slow/hung local route blocks until the cloud's own
-// ~45s relay timeout, stalling the whole scan; failing fast posts a clean 504
-// back so the crawler moves on. Kept under the cloud's relay wait.
+// relay timeout, stalling the scan; failing fast posts a clean 504 back so the
+// crawler moves on. Kept under the cloud's relay wait.
 const LOCAL_FETCH_TIMEOUT_MS = 25_000;
+
+// How many pollers drain the request queue in PARALLEL. A single serial poller
+// dequeues one request per round-trip, which a Vite dev server (unbundled ES
+// modules → dozens/hundreds of requests per page load) overwhelms — the tail of
+// the burst 504s and the SPA renders blank. A pool drains the burst concurrently.
+const POLLERS = Number(process.env.AEGIS_TUNNEL_POLLERS) || 8;
+// Abort a single poll if it hangs past this (server long-polls ~20s, so this is
+// idle-window + margin) — a wedged connection can't stall a poller forever.
+const POLL_TIMEOUT_MS = 30_000;
 
 async function handleReq(base, tunnelId, authHeaders, target, req, log) {
   let status = 502;
@@ -56,17 +65,43 @@ async function handleReq(base, tunnelId, authHeaders, target, req, log) {
   }).catch(() => {});
 }
 
+// AbortSignal that fires on EITHER a per-poll timeout OR the caller's shutdown
+// signal (AbortSignal.any isn't on Node 18, so wire it by hand).
+function pollAbort(outer, ms) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  const onOuter = () => ac.abort();
+  if (outer) {
+    if (outer.aborted) ac.abort();
+    else outer.addEventListener('abort', onOuter, { once: true });
+  }
+  return { signal: ac.signal, cleanup: () => { clearTimeout(timer); outer?.removeEventListener?.('abort', onOuter); } };
+}
+
 export async function runTunnel({ api, token, port, host, log, onReady, signal }) {
   const base = (api || DEFAULT_API).replace(/\/+$/, '');
   const authHeaders = { Authorization: `Bearer ${token}` };
   const target = `http://${host}:${port}`;
 
-  const reg = await fetch(`${base}/tunnel/register`, { method: 'POST', headers: authHeaders });
-  if (!reg.ok) {
-    const detail = reg.status === 401 ? 'check your token' : reg.status === 402 ? 'tunnels need a Pro or Business plan' : `HTTP ${reg.status}`;
-    throw new Error(`Could not open tunnel (${detail}).`);
+  let tunnelId = '';
+  let publicUrl = '';
+
+  // Open (or reclaim) a tunnel. Passing the current id lets the server hand back
+  // the SAME public URL after a blip so an in-flight scan survives.
+  async function register(reclaimId) {
+    const qs = reclaimId ? `?id=${encodeURIComponent(reclaimId)}` : '';
+    const reg = await fetch(`${base}/tunnel/register${qs}`, { method: 'POST', headers: authHeaders });
+    if (!reg.ok) {
+      const detail = reg.status === 401 ? 'check your token' : reg.status === 402 ? 'tunnels need a Pro or Business plan' : `HTTP ${reg.status}`;
+      throw new Error(`Could not open tunnel (${detail}).`);
+    }
+    const j = await reg.json();
+    tunnelId = j.tunnelId;
+    publicUrl = j.publicUrl;
+    return j;
   }
-  const { tunnelId, publicUrl } = await reg.json();
+
+  await register();
 
   log('');
   log(`  Tunnel open`);
@@ -86,22 +121,54 @@ export async function runTunnel({ api, token, port, host, log, onReady, signal }
   catch { log(`  ! Nothing responding at ${target} yet — start your app; requests 502 until it's up.`); log(''); }
 
   // Combined mode (aegis scan --tunnel): hand the URL back so the caller can
-  // scan it while THIS process keeps polling — that concurrent poll loop is
-  // exactly what keeps the tunnel alive for the whole scan. Fire-and-forget.
+  // scan it while THIS process keeps polling. Fire-and-forget.
   if (onReady) Promise.resolve().then(() => onReady(publicUrl));
 
-  for (;;) {
-    if (signal?.aborted) return;
-    let res;
-    try { res = await fetch(`${base}/tunnel/${tunnelId}/poll`, { headers: authHeaders, signal }); }
-    catch { if (signal?.aborted) return; await sleep(1000); continue; }
-    if (res.status === 204) continue;                 // idle window elapsed — re-poll
-    if (res.status === 404) { log('  Tunnel closed.'); return; }
-    if (!res.ok) { await sleep(1000); continue; }
-    let req;
-    try { req = await res.json(); } catch { continue; }
-    // Fire-and-forget so a slow local response doesn't stall the poll loop
-    // (multiple in-flight requests are handled concurrently).
-    handleReq(base, tunnelId, authHeaders, target, req, log);
+  // Auto-reconnect: if a network blip lets the 90s+ registration TTL lapse, the
+  // next poll 404s. Re-register RECLAIMING the same id (same public URL) so the
+  // scan continues. Shared promise so N pollers 404-ing at once reconnect ONCE.
+  let reconnecting = null;
+  function reconnect() {
+    if (!reconnecting) {
+      reconnecting = (async () => {
+        for (let attempt = 0; !signal?.aborted; attempt++) {
+          try {
+            await register(tunnelId);
+            log('  Tunnel reconnected.');
+            return;
+          } catch {
+            await sleep(Math.min(1000 * 2 ** attempt, 15000));
+          }
+        }
+      })().finally(() => { reconnecting = null; });
+    }
+    return reconnecting;
   }
+
+  async function poller() {
+    for (;;) {
+      if (signal?.aborted) return;
+      const { signal: ps, cleanup } = pollAbort(signal, POLL_TIMEOUT_MS);
+      let res;
+      try {
+        res = await fetch(`${base}/tunnel/${tunnelId}/poll`, { headers: authHeaders, signal: ps });
+      } catch {
+        cleanup();
+        if (signal?.aborted) return;
+        await sleep(1000);
+        continue;
+      }
+      cleanup();
+      if (res.status === 204) continue;                 // idle window — re-poll
+      if (res.status === 404) { await reconnect(); continue; } // registration lapsed — reclaim + resume
+      if (!res.ok) { await sleep(1000); continue; }
+      let req;
+      try { req = await res.json(); } catch { continue; }
+      // Fire-and-forget so a slow local response doesn't stall this poller;
+      // the pool + concurrent handleReq keep the whole queue draining.
+      handleReq(base, tunnelId, authHeaders, target, req, log);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.max(1, POLLERS) }, () => poller()));
 }
