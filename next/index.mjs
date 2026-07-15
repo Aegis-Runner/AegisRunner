@@ -11,6 +11,7 @@
 // @aegisrunner/cli so the protocol and auth live in exactly one place.
 import { runTunnel } from '@aegisrunner/cli/lib/tunnel.mjs'
 import { makeClient, streamScanEvents } from '@aegisrunner/cli/lib/api.mjs'
+import { deriveLabel, aegisTag } from '@aegisrunner/cli/lib/label.mjs'
 import { writeFileSync, statSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -38,7 +39,6 @@ function acquireDevLock() {
   return false
 }
 
-// Parse a port from `next dev -p 3001` / `--port 3001`.
 function portFromArgv() {
   const a = process.argv
   for (let i = 0; i < a.length; i++) {
@@ -49,9 +49,7 @@ function portFromArgv() {
 }
 
 function attach(opts) {
-  // One tunnel per `next dev`, even though Next evaluates the config in several
-  // processes (see acquireDevLock).
-  if (!acquireDevLock()) return
+  if (!acquireDevLock()) return // another Next process already attached
 
   const token = opts.token || process.env.AEGIS_TOKEN
   if (!token) { console.warn('[aegis] no CI trigger token — set AEGIS_TOKEN. Skipping.'); return }
@@ -59,35 +57,38 @@ function attach(opts) {
   const host = opts.host || '127.0.0.1'
   const scanOn = opts.scanOn || 'manual'
   const port = opts.port || Number(process.env.PORT) || portFromArgv() || 3000
+  const TAG = aegisTag(deriveLabel(opts.label))
+  const info = (m) => console.log(`  ◆ ${TAG}   ${m}`)
+  const err = (m) => console.error(`  ! ${TAG}   ${m}`)
 
   let publicUrl = null
   let scanning = false
   const ac = new AbortController()
 
   async function scan() {
-    if (scanning) { console.log('  ◆ aegis   a scan is already running…'); return }
-    if (!publicUrl) { console.log('  ◆ aegis   tunnel not ready yet — one moment.'); return }
+    if (scanning) { info('a scan is already running…'); return }
+    if (!publicUrl) { info('tunnel not ready yet — one moment.'); return }
     scanning = true
     try {
-      console.log('  ◆ aegis   scanning your local app…')
+      info('scanning your local app…')
       const res = await makeClient({ api, token }).trigger({ crawl: true, baseUrl: publicUrl })
-      if (res.status === 'crawl_failed') { console.error(`  ◆ aegis   scan failed to start: ${res.error ?? 'unknown error'}`); return }
-      if (res.dashboardUrl) console.log(`  ◆ aegis   results: ${res.dashboardUrl}`)
+      if (res.status === 'crawl_failed') { err(`scan failed to start: ${res.error ?? 'unknown error'}`); return }
+      if (res.dashboardUrl) info(`results: ${res.dashboardUrl}`)
       if (!res.crawl_id) return
       await streamScanEvents({
         api, token, crawlId: res.crawl_id,
         onEvent: (event, d) => {
           d = d || {}
-          if (event === 'crawl_progress') console.log(`  ◆ aegis   crawling · ${d.pagesFound ?? '?'} page(s)`)
-          else if (event === 'ai_generation_progress') console.log(`  ◆ aegis   ${d.phase_label || d.phase || 'generating tests'}${d.progress != null ? ' · ' + d.progress + '%' : ''}`)
-          else if (event === 'done') console.log(`  ◆ aegis   ${d.result === 'completed' ? '✓ scan complete — tests generated' : 'scan ' + (d.result || 'ended')}`)
+          if (event === 'crawl_progress') info(`crawling · ${d.pagesFound ?? '?'} page(s)`)
+          else if (event === 'ai_generation_progress') info(`${d.phase_label || d.phase || 'generating tests'}${d.progress != null ? ' · ' + d.progress + '%' : ''}`)
+          else if (event === 'done') info(d.result === 'completed' ? '✓ scan complete — tests generated' : `scan ${d.result || 'ended'}`)
         },
       })
     } catch (e) {
-      console.error(`  ◆ aegis   scan error: ${e.message}`)
+      err(`scan error: ${e.message}`)
     } finally {
       scanning = false
-      if (scanOn === 'manual') console.log('  ◆ aegis   press [a] + Enter to scan again')
+      if (scanOn === 'manual') info('press [a] + Enter to scan again')
     }
   }
 
@@ -95,14 +96,14 @@ function attach(opts) {
   // open the tunnel to the known dev port.
   setTimeout(() => {
     runTunnel({
-      api, token, port, host, log: (m) => console.log(m), signal: ac.signal,
+      api, token, port, host, log: info, signal: ac.signal,
       onReady: (url) => {
         publicUrl = url
-        console.log(`\n  ◆ aegis   tunnel open → ${url}`)
+        info(`tunnel open → ${url}`)
         if (scanOn === 'startup') scan()
-        else console.log('  ◆ aegis   press [a] + Enter to scan your local app')
+        else info('press [a] + Enter to scan your local app')
       },
-    }).catch((e) => console.error(`[aegis] tunnel error: ${e.message}`))
+    }).catch((e) => err(`tunnel error: ${e.message}`))
   }, 1500)
 
   if (scanOn === 'manual' && process.stdin.isTTY) {
@@ -116,7 +117,7 @@ function attach(opts) {
  * other phase (build, prod) it's a pure pass-through.
  *
  * @param {object|Function} [nextConfig]  your existing next config (object or (phase,ctx)=>config)
- * @param {object} [opts]  { token, api, port, host, scanOn: 'manual'|'startup' }
+ * @param {object} [opts]  { token, api, port, host, scanOn: 'manual'|'startup', label }
  */
 export default function withAegisRunner(nextConfig = {}, opts = {}) {
   return (phase, ctx) => {
