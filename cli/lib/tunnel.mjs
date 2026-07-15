@@ -16,6 +16,12 @@ function forwardHeaders(h) {
   return out;
 }
 
+// Cap how long we wait on the LOCAL app before giving up on a single relayed
+// request. Without this, a slow/hung local route blocks until the cloud's own
+// ~45s relay timeout, stalling the whole scan; failing fast posts a clean 504
+// back so the crawler moves on. Kept under the cloud's relay wait.
+const LOCAL_FETCH_TIMEOUT_MS = 25_000;
+
 async function handleReq(base, tunnelId, authHeaders, target, req, log) {
   let status = 502;
   let headers = { 'content-type': 'text/plain' };
@@ -27,6 +33,7 @@ async function handleReq(base, tunnelId, authHeaders, target, req, log) {
       headers: forwardHeaders(req.headers),
       body: hasBody ? Buffer.from(req.body, 'base64') : undefined,
       redirect: 'manual',
+      signal: AbortSignal.timeout(LOCAL_FETCH_TIMEOUT_MS),
     });
     status = r.status;
     headers = {};
@@ -34,8 +41,13 @@ async function handleReq(base, tunnelId, authHeaders, target, req, log) {
     body = Buffer.from(await r.arrayBuffer()).toString('base64');
     log(`  ← ${status} ${req.method} ${req.path}`);
   } catch (e) {
-    body = Buffer.from(`aegis-tunnel: could not reach ${target} — ${e.message}`).toString('base64');
-    log(`  ! ${req.method} ${req.path} — local app unreachable (${e.message})`);
+    const timedOut = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    status = timedOut ? 504 : 502;
+    const why = timedOut
+      ? `no response from ${target}${req.path} within ${LOCAL_FETCH_TIMEOUT_MS / 1000}s`
+      : `could not reach ${target} — ${e.message}`;
+    body = Buffer.from(`aegis-tunnel: ${why}`).toString('base64');
+    log(`  ! ${req.method} ${req.path} — ${timedOut ? 'local app did not respond in time' : `unreachable (${e.message})`}`);
   }
   await fetch(`${base}/tunnel/${tunnelId}/response`, {
     method: 'POST',
