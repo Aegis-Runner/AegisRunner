@@ -16,6 +16,18 @@ function forwardHeaders(h) {
   return out;
 }
 
+// Response headers we must NOT relay back from the local app. fetch() (undici)
+// transparently DECOMPRESSES the body, so `r.arrayBuffer()` is already plain
+// bytes — but the origin's `content-encoding: gzip|br|deflate` header is still
+// present. Forwarding it makes the browser try to gunzip plain bytes →
+// net::ERR_CONTENT_DECODING_FAILED, so the asset never loads. Next.js/Turbopack
+// dev serves its JS chunks gzipped, so this silently broke every Next scan (the
+// page shell arrives but the hydration chunks fail → blank); Vite/Nuxt dev serve
+// modules uncompressed, which is the only reason they were unaffected. Drop the
+// stale content-length too (it described the compressed body) and the hop-by-hop
+// framing headers; the proxy sets a correct length for the plain body we send.
+const RESP_DROP = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive']);
+
 // Cap how long we wait on the LOCAL app before giving up on a single relayed
 // request. Without this, a slow/hung local route blocks until the cloud's own
 // relay timeout, stalling the scan; failing fast posts a clean 504 back so the
@@ -51,7 +63,7 @@ async function handleReq(base, tunnelId, authHeaders, target, req, log) {
     });
     status = r.status;
     headers = {};
-    r.headers.forEach((v, k) => { headers[k] = v; });
+    r.headers.forEach((v, k) => { if (!RESP_DROP.has(k.toLowerCase())) headers[k] = v; });
     body = Buffer.from(await r.arrayBuffer()).toString('base64');
     log(`  ← ${status} ${req.method} ${req.path}`);
   } catch (e) {
