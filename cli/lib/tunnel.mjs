@@ -27,6 +27,11 @@ const LOCAL_FETCH_TIMEOUT_MS = 25_000;
 // modules → dozens/hundreds of requests per page load) overwhelms — the tail of
 // the burst 504s and the SPA renders blank. A pool drains the burst concurrently.
 const POLLERS = Number(process.env.AEGIS_TUNNEL_POLLERS) || 8;
+// Requests drained per poll round-trip. With `?batch=N` the server returns up to
+// N queued requests at once, so a Vite module burst drains without N separate
+// poll round-trips — the pure-HTTP equivalent of stream multiplexing. Effective
+// concurrency is POLLERS × BATCH.
+const BATCH = Number(process.env.AEGIS_TUNNEL_BATCH) || 16;
 // Abort a single poll if it hangs past this (server long-polls ~20s, so this is
 // idle-window + margin) — a wedged connection can't stall a poller forever.
 const POLL_TIMEOUT_MS = 30_000;
@@ -151,7 +156,7 @@ export async function runTunnel({ api, token, port, host, log, onReady, signal }
       const { signal: ps, cleanup } = pollAbort(signal, POLL_TIMEOUT_MS);
       let res;
       try {
-        res = await fetch(`${base}/tunnel/${tunnelId}/poll`, { headers: authHeaders, signal: ps });
+        res = await fetch(`${base}/tunnel/${tunnelId}/poll?batch=${BATCH}`, { headers: authHeaders, signal: ps });
       } catch {
         cleanup();
         if (signal?.aborted) return;
@@ -162,11 +167,12 @@ export async function runTunnel({ api, token, port, host, log, onReady, signal }
       if (res.status === 204) continue;                 // idle window — re-poll
       if (res.status === 404) { await reconnect(); continue; } // registration lapsed — reclaim + resume
       if (!res.ok) { await sleep(1000); continue; }
-      let req;
-      try { req = await res.json(); } catch { continue; }
-      // Fire-and-forget so a slow local response doesn't stall this poller;
-      // the pool + concurrent handleReq keep the whole queue draining.
-      handleReq(base, tunnelId, authHeaders, target, req, log);
+      let reqs;
+      try { const j = await res.json(); reqs = Array.isArray(j) ? j : [j]; } catch { continue; }
+      // Fire-and-forget every request in the batch so a slow local response can't
+      // stall this poller; the pool + concurrent handleReq keep the queue draining.
+      // (Array.isArray guard keeps us compatible with a pre-batch server.)
+      for (const req of reqs) handleReq(base, tunnelId, authHeaders, target, req, log);
     }
   }
 
