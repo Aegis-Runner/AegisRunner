@@ -116,3 +116,28 @@ export async function pollRun(client, runId, { timeoutSec, intervalMs = 5000, lo
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
+
+// Wait until the LOCAL dev server is actually SERVING a page before scanning.
+// A dev server's "listening"/"ready" hook fires when the port is bound — but
+// Vite compiles modules lazily on the first request and Nuxt/Next warm up, so
+// kicking off a scan the instant the tunnel opens hits a not-yet-ready shell →
+// blank pages. Poll the local URL (which also warms Vite's first-request
+// compile) until it returns a real HTML document, then a brief settle. It is
+// best-effort: after timeoutMs it resolves anyway so a quirky app never blocks
+// the scan forever.
+export async function waitForAppReady(host, port, { log, timeoutMs = 60_000 } = {}) {
+  const url = `http://${host}:${port}/`;
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(5000) });
+      const body = await r.text();
+      if (r.ok && body.length > 200 && /<(html|body|script|div|main)\b/i.test(body)) {
+        await new Promise((res) => setTimeout(res, 800)); // settle after the first good response
+        return true;
+      }
+    } catch { /* not up yet — keep polling */ }
+    if (Date.now() > deadline) { log?.(`app not ready after ${Math.round(timeoutMs / 1000)}s — scanning anyway`); return false; }
+    await new Promise((res) => setTimeout(res, Math.min(400 * attempt, 2500)));
+  }
+}

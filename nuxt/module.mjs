@@ -11,7 +11,7 @@
 // from @aegisrunner/cli, so the protocol and auth live in exactly one place.
 import { defineNuxtModule, useLogger, addDevServerHandler } from '@nuxt/kit'
 import { runTunnel } from '@aegisrunner/cli/lib/tunnel.mjs'
-import { makeClient, streamScanEvents } from '@aegisrunner/cli/lib/api.mjs'
+import { makeClient, streamScanEvents, waitForAppReady } from '@aegisrunner/cli/lib/api.mjs'
 import { deriveLabel, aegisTag } from '@aegisrunner/cli/lib/label.mjs'
 
 export default defineNuxtModule({
@@ -70,11 +70,14 @@ export default defineNuxtModule({
       ac = new AbortController()
       runTunnel({
         api, token, port, host: opts.host, log: (m) => logger.info(m), signal: ac.signal,
-        onReady: (url) => {
+        onReady: async (url) => {
           state.tunnel = url
           logger.success(`tunnel open → ${url}`)
-          if (opts.scanOn === 'startup') scan()
-          else logger.info('press [a] + Enter to scan (or use the AegisRunner DevTools tab)')
+          if (opts.scanOn === 'startup') {
+            logger.info('waiting for your app to finish loading…')
+            await waitForAppReady(opts.host, port, { log: (m) => logger.info(m) })
+            scan()
+          } else logger.info('press [a] + Enter to scan (or use the AegisRunner DevTools tab)')
         },
       }).catch((e) => logger.error(`tunnel error: ${e.message}`))
     })

@@ -9,7 +9,7 @@
 // The tunnel client, scan trigger and live-progress stream are reused verbatim
 // from @aegisrunner/cli, so the protocol and auth live in exactly one place.
 import { runTunnel } from '@aegisrunner/cli/lib/tunnel.mjs'
-import { makeClient, streamScanEvents } from '@aegisrunner/cli/lib/api.mjs'
+import { makeClient, streamScanEvents, waitForAppReady } from '@aegisrunner/cli/lib/api.mjs'
 import { deriveLabel, aegisTag } from '@aegisrunner/cli/lib/label.mjs'
 
 /**
@@ -84,11 +84,14 @@ export default function aegis(opts = {}) {
         ac = new AbortController()
         runTunnel({
           api, token, port, host, log: info, signal: ac.signal,
-          onReady: (url) => {
+          onReady: async (url) => {
             publicUrl = url
             info(`tunnel open → ${url}`)
-            if (scanOn === 'startup') scan()
-            else info('press [a] + Enter to scan your local app')
+            if (scanOn === 'startup') {
+              info('waiting for your app to finish loading…')
+              await waitForAppReady(host, port, { log: info })
+              scan()
+            } else info('press [a] + Enter to scan your local app')
           },
         }).catch((e) => err(`tunnel error: ${e.message}`))
       })

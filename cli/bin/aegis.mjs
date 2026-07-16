@@ -4,7 +4,7 @@
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs, UsageError } from '../lib/args.mjs';
-import { makeClient, pollRun, ApiError, DEFAULT_API } from '../lib/api.mjs';
+import { makeClient, pollRun, ApiError, DEFAULT_API, waitForAppReady } from '../lib/api.mjs';
 import { buildJUnit } from '../lib/junit.mjs';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -496,10 +496,14 @@ async function cmdDev(opts, positional) {
     runTunnel({
       api: opts.api || process.env.AEGIS_API, token,
       port, host: opts.host || '127.0.0.1', log, signal: ac.signal,
-      onReady: (url) => {
+      onReady: async (url) => {
         publicUrl = url;
         aeg(`tunnel open → ${url}`);
-        if (opts.scanOn === 'startup') runScan(); else printKeys();
+        if (opts.scanOn === 'startup') {
+          aeg('waiting for your app to finish loading…');
+          await waitForAppReady(opts.host || '127.0.0.1', port, { log });
+          runScan();
+        } else printKeys();
       },
     }).catch((e) => aegW(`tunnel error: ${e.message}`));
   };
