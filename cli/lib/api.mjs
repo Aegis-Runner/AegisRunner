@@ -125,14 +125,24 @@ export async function pollRun(client, runId, { timeoutSec, intervalMs = 5000, lo
 // compile) until it returns a real HTML document, then a brief settle. It is
 // best-effort: after timeoutMs it resolves anyway so a quirky app never blocks
 // the scan forever.
-export async function waitForAppReady(host, port, { log, timeoutMs = 60_000 } = {}) {
-  const url = `http://${host}:${port}/`;
+export async function waitForAppReady(host, port, { log, timeoutMs = 60_000, warmAssets = true } = {}) {
+  const origin = `http://${host}:${port}`;
+  const url = `${origin}/`;
   const deadline = Date.now() + timeoutMs;
   for (let attempt = 1; ; attempt++) {
     try {
       const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(5000) });
       const body = await r.text();
       if (r.ok && body.length > 200 && /<(html|body|script|div|main)\b/i.test(body)) {
+        // A real document is being served — but that's not the same as being
+        // renderable. Next.js dev is the sharp case: its Pages Router hides the
+        // whole <body> (`display:none`) until the client JS HYDRATES, and those
+        // JS chunks are compiled ON DEMAND on first request. So the scanner's
+        // first load races the compile — a chunk 404s, hydration never runs, the
+        // body stays hidden, and the page screenshots blank. Warm the referenced
+        // same-origin JS now (from here, on the fast localhost path) so the
+        // chunks are compiled and cached before the scan ever loads the page.
+        if (warmAssets) await warmReferencedAssets(origin, body, log);
         await new Promise((res) => setTimeout(res, 800)); // settle after the first good response
         return true;
       }
@@ -140,4 +150,35 @@ export async function waitForAppReady(host, port, { log, timeoutMs = 60_000 } = 
     if (Date.now() > deadline) { log?.(`app not ready after ${Math.round(timeoutMs / 1000)}s — scanning anyway`); return false; }
     await new Promise((res) => setTimeout(res, Math.min(400 * attempt, 2500)));
   }
+}
+
+// Fetch the same-origin scripts a freshly-served HTML shell references, forcing
+// a dev server that compiles chunks lazily (Next.js especially) to build them
+// before the scan loads the page — so hydration finds them already compiled
+// instead of racing a 404. Best-effort and bounded: never throws, never blocks
+// the scan for more than a moment, capped in count and time.
+async function warmReferencedAssets(origin, html, log) {
+  const urls = new Set();
+  const re = /<(?:script|link)\b[^>]*?\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
+  let m;
+  while ((m = re.exec(html)) && urls.size < 32) {
+    const raw = m[1];
+    if (!raw || raw.startsWith('data:') || raw.startsWith('#')) continue;
+    let abs;
+    if (raw.startsWith('/') && !raw.startsWith('//')) abs = origin + raw; // same-origin absolute path
+    else if (raw.startsWith(origin)) abs = raw;                           // explicit same origin
+    else continue;                                                        // cross-origin / protocol-relative — skip
+    if (!/\.(?:m?js|css)(?:[?#]|$)/i.test(abs)) continue;                 // JS/CSS only — hydration gating assets
+    urls.add(abs);
+  }
+  if (!urls.size) return;
+  let ok = 0;
+  await Promise.all([...urls].map(async (u) => {
+    try {
+      const r = await fetch(u, { signal: AbortSignal.timeout(15_000) });
+      await r.arrayBuffer(); // drain so the dev server finishes compiling before we move on
+      if (r.ok) ok++;
+    } catch { /* best-effort — a chunk we can't prefetch just compiles on demand */ }
+  }));
+  log?.(`prepared ${ok}/${urls.size} app asset(s)`);
 }
