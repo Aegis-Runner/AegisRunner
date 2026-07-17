@@ -1,0 +1,47 @@
+name: release-scan-runner
+# Publishes the AegisRunner scan-runner (the browser executor for
+# `aegis scan --local`) on a `scan-runner-v*` tag:
+#   git tag scan-runner-v1.0.0 && git push origin scan-runner-v1.0.0
+#
+# Required repo secrets (already used by release-cli.yml):
+#   DOCKERHUB_USERNAME   — Docker Hub user (aegisrunner1)
+#   DOCKERHUB_TOKEN      — Docker Hub access token
+# GHCR uses the built-in GITHUB_TOKEN.
+on:
+  push:
+    tags: ['scan-runner-v*']
+permissions:
+  contents: read
+  packages: write
+jobs:
+  docker:
+    name: Build & push scan-runner image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Derive version from the tag
+        id: v
+        run: echo "version=${GITHUB_REF_NAME#scan-runner-v}" >> "$GITHUB_OUTPUT"
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: scan-runner
+          push: true
+          tags: |
+            aegisrunner1/scan-runner:${{ steps.v.outputs.version }}
+            aegisrunner1/scan-runner:latest
+            ghcr.io/aegis-runner/scan-runner:${{ steps.v.outputs.version }}
+            ghcr.io/aegis-runner/scan-runner:latest
