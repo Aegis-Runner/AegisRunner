@@ -55,12 +55,13 @@ Exit codes: 0 all passed · 1 test failures · 2 error/timeout/cancelled`,
     fn: cmdRun,
   },
   scan: {
-    spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false }, watch: { type: 'bool', default: false }, tunnel: { type: 'bool', default: false }, port: { type: 'int' }, host: { type: 'string', default: '127.0.0.1' }, role: { type: 'string' }, username: { type: 'string' }, passwordStdin: { type: 'bool', default: false } },
+    spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false }, watch: { type: 'bool', default: false }, tunnel: { type: 'bool', default: false }, local: { type: 'bool', default: false }, port: { type: 'int' }, host: { type: 'string', default: '127.0.0.1' }, role: { type: 'string' }, username: { type: 'string' }, passwordStdin: { type: 'bool', default: false } },
     help: `aegis scan — trigger a full site scan (tests auto-generate afterwards)
 
 Usage:
   aegis scan [--url <baseUrl>] [--watch]
   aegis scan --tunnel --port <port>          # scan a LOCAL app through a tunnel
+  aegis scan --local --url <private-url>     # scan on YOUR self-hosted runner
   aegis scan --username <u> --password-stdin # scan behind a login
 
   --url <u>          Base URL to scan (default: the project's configured base URL)
@@ -69,6 +70,12 @@ Usage:
   --tunnel           Open a tunnel to your local app, scan it, and watch — all in ONE
                      process, so the tunnel stays alive for the whole scan. Needs --port.
   --port <p>         Local port your app runs on (with --tunnel, e.g. 3000).
+  --local            Run the BROWSER on your own self-hosted runner instead of our
+                     cloud. Your app, its traffic, and credentials stay on your
+                     network — only the findings come back. Ideal for firewalled or
+                     localhost-only apps the cloud can't reach. Point --url at the
+                     private target (e.g. http://localhost:3000). Requires a runner
+                     to be connected — start one with the runner image (see RUNNER.md).
 
 Sign in during the scan (so pages behind a login get tested):
   --username <u>     Login identity — email, username, phone, whatever the form uses.
@@ -91,16 +98,42 @@ Without --watch/--tunnel the scan fires and returns; follow it on the dashboard.
       appName: { type: 'string' },
       platform: { type: 'string' },
       role: { type: 'string' },
+      local: { type: 'bool', default: false },
+      package: { type: 'string' },
     },
     help: `aegis mobile-scan — start an on-device mobile app scan (fire-and-forget)
 
 Usage: aegis mobile-scan [--app <tb://…|apk-url>] [--platform android|ios] [--role <r>]
+       aegis mobile-scan --local --package <app.package.id>
 
   --app <ref>       Device-cloud ref or APK URL (default: the project's last scanned app)
   --app-name <n>    Display name for the generated suites
   --platform <p>    android | ios
-  --role <r>        Explore the app as this role (uses that role's saved login)`,
+  --role <r>        Explore the app as this role (uses that role's saved login)
+  --local           Drive YOUR OWN local device (see 'aegis mobile-runner'). The
+                    APK + device never leave your machine; the AI brain stays in
+                    the cloud. Requires a running 'aegis mobile-runner'.
+  --package <id>    App package id for --local (e.g. com.acme.app)`,
     fn: cmdMobileScan,
+  },
+  'mobile-runner': {
+    spec: { ...COMMON, apk: { type: 'string' }, appium: { type: 'string' } },
+    help: `aegis mobile-runner — run the device side of a local mobile scan on your box.
+
+Claims mobile-scan jobs from AegisRunner over an outbound-only HTTPS connection
+and replays the cloud explorer's device actions against a LOCAL Appium server —
+so your APK and the device never leave your machine. Pair with:
+  aegis mobile-scan --local --package <id>
+
+Usage: aegis mobile-runner --apk ./app.apk [--appium http://localhost:4723] [--token <t>]
+
+  --apk <path>     Path to the .apk to install on the local device (required)
+  --appium <url>   Local Appium base URL (default http://localhost:4723)
+  --token <t>      CI trigger token (or env AEGIS_TOKEN)
+
+Need a device? See the bundled ReDroid+Appium compose (docker compose up).
+Press Ctrl-C to stop.`,
+    fn: cmdMobileRunner,
   },
   status: {
     spec: { ...COMMON, format: { type: 'string', default: 'text' } },
@@ -200,6 +233,7 @@ Commands:
   run          Trigger a test run, wait, and report (text/json/junit)
   scan         Trigger a full site scan
   mobile-scan  Trigger an on-device mobile app scan
+  mobile-runner   Run the device side of a local mobile scan (--local) on your box
   status       Check a run's status once
   tunnel       Expose a local app to the cloud scanner (behind a firewall/NAT)
   runner       Run a self-hosted runner inside your network (outbound-only)
@@ -327,6 +361,10 @@ async function resolveScanAuth(opts) {
 }
 
 async function cmdScan(opts) {
+  if (opts.tunnel && opts.local) {
+    throw new UsageError('--tunnel and --local are mutually exclusive. --tunnel relays OUR cloud browser to your app; --local runs the browser ON your own runner (nothing relayed).');
+  }
+  if (opts.local) return await cmdScanLocal(opts);
   if (opts.tunnel) return await cmdScanViaTunnel(opts);
   // Guard the empty-string footgun: `--url ""` (e.g. a capture script that
   // grabbed nothing) would otherwise be falsy and silently fall back to the
@@ -434,6 +472,42 @@ async function cmdScanViaTunnel(opts) {
     },
   });
   return exitCode;
+}
+
+// aegis scan --local: run the BROWSER on the customer's own self-hosted runner.
+// The backend mints a broker session when it sees local:true; the cloud AI loop
+// drives that session's browser (on the runner) over the broker. The app, its
+// traffic, and any credentials never leave the customer's network — only the
+// findings come back. The runner claims the scan job from the project's queue
+// over outbound HTTPS. Requires a connected runner (the runner image).
+async function cmdScanLocal(opts) {
+  if (opts.url !== undefined && String(opts.url).trim() === '') {
+    throw new UsageError("--local needs a target: pass --url pointing at your private app (e.g. --url http://localhost:3000), or omit --url to use the project's configured URL.");
+  }
+  // A local scan's whole point is that credentials never reach our cloud. So we
+  // refuse cloud-bound login flags here — the runner supplies them from its OWN
+  // environment (AEGIS_USERNAME / AEGIS_PASSWORD) so they stay on your network.
+  if (opts.username || opts.passwordStdin || process.env.AEGIS_PASSWORD) {
+    throw new UsageError('For --local, credentials must NOT be sent to the cloud. Set AEGIS_USERNAME and AEGIS_PASSWORD on the RUNNER instead — they stay on your network and the runner logs in locally. Drop --username/--password-stdin/AEGIS_PASSWORD from this command.');
+  }
+  const body = { crawl: true, local: true };
+  if (opts.url) body.baseUrl = opts.url;
+  // --role is a tag only (no secret) — safe to forward so the scan/tests are
+  // labelled with the role. The actual login happens on the runner.
+  const role = opts.role && String(opts.role).trim();
+  if (role) body.authRole = role;
+
+  const res = await client(opts).trigger(body);
+  if (res.status === 'crawl_failed') {
+    log(`Local scan failed to start: ${res.error ?? 'unknown error'}`);
+    return 2;
+  }
+  log(`Local scan started (crawl ${res.crawl_id ?? '?'}).`);
+  log('  The browser runs on your self-hosted runner — your app never leaves your network.');
+  log('  If it stalls, make sure a runner is connected to this project (see RUNNER.md).');
+  if (res.dashboardUrl) log(`  Watch it: ${res.dashboardUrl}`);
+  if ((opts.watch || opts.wait) && res.crawl_id) return await watchScan(opts, res.crawl_id);
+  return 0;
 }
 
 // aegis dev -- <cmd>: run the dev server AND keep a tunnel open to it for the
@@ -615,9 +689,31 @@ async function cmdHooks(opts, positional) {
 async function cmdMobileScan(opts) {
   const mobileScan = {};
   for (const k of ['app', 'appName', 'platform', 'role']) if (opts[k]) mobileScan[k] = opts[k];
+  if (opts.local) {
+    mobileScan.local = true;
+    if (opts.package) mobileScan.appPackage = opts.package;
+    if (!opts.package) log('note: pass --package <app.id> so the explorer can track your app on the device.');
+  }
   const res = await client(opts).trigger({ mobileScan });
   log(res.message || 'Mobile scan started.');
+  if (opts.local) log('Driving your local device — keep `aegis mobile-runner` running until it finishes.');
   return 0;
+}
+
+async function cmdMobileRunner(opts) {
+  const token = opts.token || process.env.AEGIS_TOKEN;
+  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const apk = opts.apk || process.env.AEGIS_APK;
+  if (!apk) throw new UsageError('Usage: aegis mobile-runner --apk ./app.apk  (path the local Appium can read)');
+  const { runMobileExecutor } = await import('../lib/mobileExecutor.mjs');
+  await runMobileExecutor({
+    api: opts.api || process.env.AEGIS_API,
+    token,
+    apk,
+    appium: opts.appium || process.env.AEGIS_APPIUM,
+    log,
+  });
+  return 0; // loops until Ctrl-C
 }
 
 async function cmdTunnel(opts) {
