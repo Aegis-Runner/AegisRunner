@@ -61,6 +61,17 @@ function portFromArgv() {
   return null
 }
 
+// Is this `next dev` running under Turbopack? Next 16 defaults to it, and it
+// hard-errors if a `webpack` config key is present — so we must not add one.
+function usingTurbopack() {
+  const a = process.argv
+  if (a.includes('--webpack')) return false                       // explicit opt-out → webpack
+  if (a.some((x) => x === '--turbo' || x === '--turbopack')) return true
+  if (process.env.TURBOPACK || process.env.TURBOPACK_DEV || process.env.__NEXT_TURBOPACK) return true
+  try { if (parseInt(require('next/package.json').version, 10) >= 16) return true } catch { /* unknown */ }
+  return false
+}
+
 function attach(opts, controlPort) {
   if (!acquireDevLock()) return // another Next process already attached
 
@@ -85,6 +96,12 @@ function attach(opts, controlPort) {
     server.on('error', (e) => { if (e.code === 'EADDRINUSE') info(`widget control port ${controlPort} busy — served by another instance`); else info(`widget control error: ${e.message}`) })
     server.listen(controlPort, '127.0.0.1', () => info('AegisRunner widget ready — click the shield in your app to scan'))
     process.on('exit', () => { try { server.close() } catch { /* ignore */ } })
+  }
+
+  // Under Turbopack we can't auto-inject the widget (no webpack entry) — tell the
+  // user the one line that shows it. Scans + [a] + the widget's endpoints all work.
+  if (opts.widget !== false && usingTurbopack()) {
+    info('Next is on Turbopack — to show the in-app shield add  <script async src="/__aegis/widget.js"></script>  to your root layout (dev only), or run `next dev --webpack` for auto-injection.')
   }
 
   // Next config-evals happen before the dev server binds; give it a moment so a
@@ -134,9 +151,14 @@ function injectWidget(config, controlPort) {
     return { beforeFiles: [...mine, ...(user.beforeFiles || [])], afterFiles: user.afterFiles || [], fallback: user.fallback || [] }
   }
 
+  // Next 16 defaults to Turbopack, which HARD-ERRORS if a `webpack` config key is
+  // present. So we only wire the webpack entry when webpack is actually in use;
+  // under Turbopack the /__aegis rewrite still serves the widget — add
+  // <script async src="/__aegis/widget.js"> to your root layout to show it (or run
+  // `next dev --webpack` for auto-injection). See attach() for the one-time hint.
   let widgetEntry = null
   try { widgetEntry = require.resolve('@aegisrunner/cli/lib/aegisWidget.client.js') } catch { /* degrade to the manual <script> */ }
-  if (widgetEntry) {
+  if (widgetEntry && !usingTurbopack()) {
     const origWebpack = cfg.webpack
     cfg.webpack = (wc, wctx) => {
       const out = origWebpack ? origWebpack(wc, wctx) : wc
