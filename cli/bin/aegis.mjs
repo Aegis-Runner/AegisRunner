@@ -70,12 +70,13 @@ Usage:
   --tunnel           Open a tunnel to your local app, scan it, and watch — all in ONE
                      process, so the tunnel stays alive for the whole scan. Needs --port.
   --port <p>         Local port your app runs on (with --tunnel, e.g. 3000).
-  --local            Run the BROWSER on your own self-hosted runner instead of our
-                     cloud. Your app, its traffic, and credentials stay on your
-                     network — only the findings come back. Ideal for firewalled or
+  --local            Run the BROWSER on your own machine instead of our cloud.
+                     Your app, its traffic, and credentials stay on your network —
+                     only the findings come back. Ideal for firewalled or
                      localhost-only apps the cloud can't reach. Point --url at the
-                     private target (e.g. http://localhost:3000). Requires a runner
-                     to be connected — start one with the runner image (see RUNNER.md).
+                     private target (e.g. http://localhost:3000). Needs a runner
+                     connected — start one (no Docker) with:  aegis scan-runner
+                     (or the container: docker run aegisrunner1/scan-runner).
 
 Sign in during the scan (so pages behind a login get tested):
   --username <u>     Login identity — email, username, phone, whatever the form uses.
@@ -209,6 +210,24 @@ Queue work for it from anywhere with:
 Press Ctrl-C to stop.`,
     fn: cmdRunner,
   },
+  'scan-runner': {
+    spec: { ...COMMON },
+    help: `aegis scan-runner — run the browser executor for 'aegis scan --local' on your
+own machine, WITHOUT Docker.
+
+Runs a local headless Chromium (via Playwright) that claims scan jobs over
+outbound-only HTTPS and drives them against your app. Your app, its traffic, and
+credentials stay on your machine. First run installs Chromium (~150MB, cached).
+
+Usage: aegis scan-runner [--token <t>] [--api <base>]
+
+Authed scans: set AEGIS_USERNAME / AEGIS_PASSWORD in the environment.
+Prefer containers? Use the image instead:
+  docker run -e AEGIS_TOKEN=… aegisrunner1/scan-runner
+
+Press Ctrl-C to stop.`,
+    fn: cmdScanRunner,
+  },
   'runner-enqueue': {
     spec: { ...COMMON, url: { type: 'string' }, note: { type: 'string' }, role: { type: 'string' }, wait: { type: 'bool', default: true }, timeout: { type: 'int', default: 120 } },
     help: `aegis runner-enqueue — queue a job for a self-hosted runner to execute.
@@ -234,6 +253,7 @@ Commands:
   scan         Trigger a full site scan
   mobile-scan  Trigger an on-device mobile app scan
   mobile-runner   Run the device side of a local mobile scan (--local) on your box
+  scan-runner  Run the browser executor for 'scan --local' locally (no Docker)
   status       Check a run's status once
   tunnel       Expose a local app to the cloud scanner (behind a firewall/NAT)
   runner       Run a self-hosted runner inside your network (outbound-only)
@@ -730,6 +750,27 @@ async function cmdRunner(opts) {
   if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
   const { runRunner } = await import('../lib/runner.mjs');
   await runRunner({ api: opts.api || process.env.AEGIS_API, token, log });
+  return 0; // loops until Ctrl-C
+}
+
+async function cmdScanRunner(opts) {
+  const token = opts.token || process.env.AEGIS_TOKEN;
+  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  // The browser executor needs Playwright (~a heavy dep), so it lives in its own
+  // package to keep this CLI zero-dependency. Delegate to it via npx — installed
+  // + cached on first use. The token/api go via ENV (not argv) so they don't leak
+  // into the process list.
+  const { spawn } = await import('node:child_process');
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const env = { ...process.env, AEGIS_TOKEN: token };
+  const api = opts.api || process.env.AEGIS_API;
+  if (api) env.AEGIS_API = api;
+  log('starting the local browser executor via @aegisrunner/scan-runner (no Docker)…');
+  const child = spawn(npx, ['--yes', '@aegisrunner/scan-runner'], { env, stdio: 'inherit', shell: process.platform === 'win32' });
+  const onSig = () => { try { child.kill('SIGINT'); } catch { /* ignore */ } };
+  process.on('SIGINT', onSig);
+  process.on('SIGTERM', onSig);
+  await new Promise((r) => child.on('exit', r));
   return 0; // loops until Ctrl-C
 }
 
