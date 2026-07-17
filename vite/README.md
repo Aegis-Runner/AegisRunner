@@ -31,6 +31,17 @@ export AEGIS_TOKEN=aegis_xxxxxxxx
 npm run dev
 ```
 
+## In-app widget
+
+A floating AegisRunner **shield** appears in the corner of your dev app. Click it to:
+
+- **Test this page** — scan just the current route
+- **Test whole site** — a full AI crawl + test generation
+- **Login credentials** — set a username/password so gated pages get scanned
+
+…and watch live progress with a link to the results. No terminal, no context switch.
+(Pass `aegis({ widget: false })` to disable it; you can still press **[a]** in the terminal.)
+
 ```text
   VITE v5  ready in 140 ms
   ➜  Local:   http://localhost:5173/

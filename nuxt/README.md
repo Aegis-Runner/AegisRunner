@@ -26,6 +26,14 @@ export AEGIS_TOKEN=aegis_xxxxxxxx   # a project CI trigger token (Pro/Business)
 npm run dev
 ```
 
+## In-app widget
+
+A floating AegisRunner **shield** appears in the corner of your app. Click it to
+**Test this page** (just the current route), **Test whole site** (a full crawl), or
+set **login credentials** for gated pages — with live progress and a link to the
+results. The DevTools tab shows the same status. (Pass `aegis: { widget: false }`
+to disable; `[a]` in the terminal still works.)
+
 ```text
 ℹ Nuxt 3  →  http://localhost:3000/
 
