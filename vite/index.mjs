@@ -1,94 +1,51 @@
 // @aegisrunner/vite — attach AegisRunner to your Vite dev server.
 //
 // One line in vite.config puts an AI scan of your LOCALHOST app right in the
-// browser: the plugin learns the dev-server port, opens a secure outbound tunnel
-// (held for the whole session), and injects a floating AegisRunner widget into
-// your dev app. Click it to "Test this page" or "Test the whole site", add login
-// credentials for gated pages, and watch progress — no deploy, no staging URL,
-// no second terminal. (You can still press `[a]` in the terminal, or scan on
-// startup.)
+// browser. By DEFAULT the scan runs ENTIRELY on your machine: a real browser
+// (@aegisrunner/scan-runner) drives your app at http://localhost directly — no
+// cloud relay, no tunnel. That's the fastest, most reliable path for big apps
+// (hundreds of routes, Vite's module bursts) and your app + credentials never
+// leave your machine. Prefer to relay OUR cloud browser over an outbound tunnel
+// instead (nothing to install locally)? Pass { runner: 'tunnel' }.
 //
-// The tunnel client, scan trigger, live-progress stream and the widget/control
-// protocol are reused verbatim from @aegisrunner/cli, so the protocol and auth
+// A floating AegisRunner widget is injected into your dev app: click it to
+// "Test this page" or "Test the whole site", add login credentials for gated
+// pages, and watch progress. You can still press [a] in the terminal, or scan on
+// startup.
+//
+// The runner lifecycle, tunnel client, scan trigger, live-progress stream and the
+// widget/control protocol all come from @aegisrunner/cli so the protocol and auth
 // live in exactly one place.
-import { runTunnel } from '@aegisrunner/cli/lib/tunnel.mjs'
-import { makeClient, streamScanEvents, waitForAppReady } from '@aegisrunner/cli/lib/api.mjs'
 import { deriveLabel, aegisTag } from '@aegisrunner/cli/lib/label.mjs'
-import { createAegisControl, aegisWidgetTag } from '@aegisrunner/cli/lib/devWidget.mjs'
+import { createDevSession } from '@aegisrunner/cli/lib/devSession.mjs'
 
 /**
  * @param {object} [opts]
  * @param {string} [opts.token]   CI trigger token (default: process.env.AEGIS_TOKEN). Pro/Business.
  * @param {string} [opts.api]     API base (default: process.env.AEGIS_API or the public API).
+ * @param {'local'|'tunnel'} [opts.runner]  where the browser runs. 'local' (default) — on your
+ *        machine, scanning http://localhost directly (no tunnel). 'tunnel' — relay our cloud browser.
  * @param {number} [opts.port]    Dev-server port (default: detected from the running server).
- * @param {string} [opts.host]    Local host to forward to (default: '127.0.0.1').
- * @param {'manual'|'startup'} [opts.scanOn]  'manual' or 'startup'. Default 'manual'.
+ * @param {string} [opts.host]    Local host the app listens on (default: '127.0.0.1').
+ * @param {'manual'|'startup'} [opts.scanOn]  'manual' (press a / click) or 'startup'. Default 'manual'.
  * @param {boolean} [opts.widget]  Inject the in-page widget (default true).
  * @param {string} [opts.label]   Label shown in logs (default: package name).
  */
 export default function aegis(opts = {}) {
-  const scanOn = opts.scanOn || 'manual'
-  const host = opts.host || '127.0.0.1'
   const token = opts.token || process.env.AEGIS_TOKEN
   const api = opts.api || process.env.AEGIS_API
+  const host = opts.host || '127.0.0.1'
+  const mode = opts.runner === 'tunnel' ? 'tunnel' : 'local'
+  const scanOn = opts.scanOn || 'manual'
   const showWidget = opts.widget !== false
   const TAG = aegisTag(deriveLabel(opts.label))
 
-  let publicUrl = null
-  let scanning = false
-  let ac = null
   let logger = console
-  let creds = null
-  // Widget/CLI-visible status. resultsUrl is set when a scan finishes.
-  const status = { scanning: false, message: 'Ready to scan.', resultsUrl: null, error: false }
-
   const emit = (fn, mark, m) => { const s = `  ${mark} ${TAG}   ${m}`; (logger && logger[fn]) ? logger[fn](s) : console[fn === 'error' ? 'error' : fn === 'warn' ? 'warn' : 'log'](s) }
   const info = (m) => emit('info', '◆', m)
   const warn = (m) => emit('warn', '!', m)
-  const err = (m) => emit('error', '!', m)
 
-  // scope: 'site' (full crawl from root) | 'page' (just the current route). path
-  // is the current route for page scope.
-  async function scan({ scope = 'site', path = '/' } = {}) {
-    if (scanning) { info('a scan is already running…'); return }
-    if (!publicUrl) { info('tunnel not ready yet — one moment.'); status.message = 'Connecting…'; return }
-    scanning = true
-    status.scanning = true; status.error = false; status.resultsUrl = null
-    const isPage = scope === 'page'
-    const baseUrl = isPage ? joinUrl(publicUrl, path) : publicUrl
-    status.message = isPage ? 'Scanning this page…' : 'Scanning the whole site…'
-    try {
-      info(status.message + ` → ${baseUrl}`)
-      const body = { crawl: true, baseUrl }
-      if (isPage) { body.maxPages = 1; body.maxDepth = 0 }     // just this route
-      if (creds && creds.username) body.credentials = { username: creds.username, password: creds.password || '' }
-      const res = await makeClient({ api, token }).trigger(body)
-      if (res.status === 'crawl_failed') { status.error = true; status.message = `Scan failed: ${res.error ?? 'unknown error'}`; err(status.message); return }
-      if (res.dashboardUrl) { status.resultsUrl = res.dashboardUrl; info(`results: ${res.dashboardUrl}`) }
-      if (!res.crawl_id) return
-      await streamScanEvents({
-        api, token, crawlId: res.crawl_id,
-        onEvent: (event, d) => {
-          d = d || {}
-          if (event === 'crawl_progress') { status.message = `Crawling · ${d.pagesFound ?? '?'} page(s)`; info(status.message) }
-          else if (event === 'ai_generation_progress') { status.message = `${d.phase_label || d.phase || 'Generating tests'}${d.progress != null ? ' · ' + d.progress + '%' : ''}`; info(status.message) }
-          else if (event === 'done') { status.message = d.result === 'completed' ? '✓ Tests generated.' : `Scan ${d.result || 'ended'}.`; info(status.message) }
-        },
-      })
-    } catch (e) {
-      status.error = true; status.message = `Scan error: ${e.message}`; err(status.message)
-    } finally {
-      scanning = false
-      status.scanning = false
-      if (scanOn === 'manual' && !status.error && !status.resultsUrl) status.message = 'Ready to scan.'
-    }
-  }
-
-  const control = createAegisControl({
-    onScan: (r) => { scan(r) },
-    setCredentials: (c) => { creds = c && c.username ? c : null; info(creds ? `credentials set for ${creds.username}` : 'credentials cleared') },
-    getStatus: () => ({ scanning: status.scanning, message: status.message, resultsUrl: status.resultsUrl || undefined, error: status.error }),
-  })
+  let session = null
 
   return {
     name: 'aegisrunner',
@@ -102,47 +59,35 @@ export default function aegis(opts = {}) {
 
     configureServer(server) {
       logger = server.config.logger || console
-      if (!token) {
-        warn('no CI trigger token — set AEGIS_TOKEN (or pass { token }). Skipping.')
-        return
-      }
+      if (!token) { warn('no CI trigger token — set AEGIS_TOKEN (or pass { token }). Skipping.'); return }
 
-      // Serve the widget + control endpoints.
-      server.middlewares.use((req, res, next) => { control(req, res).then((handled) => { if (!handled) next() }).catch(() => next()) })
+      // Serve the widget + control endpoints. Registered synchronously (before the
+      // server starts listening) so /__aegis is caught; it delegates to the session,
+      // which is created once we know the port — always before the first request.
+      server.middlewares.use((req, res, next) => {
+        const control = session && session.control
+        if (!control) return next()
+        control(req, res).then((handled) => { if (!handled) next() }).catch(() => next())
+      })
 
       server.httpServer?.once('listening', () => {
         const addr = server.httpServer.address()
         const port = opts.port || (addr && typeof addr === 'object' ? addr.port : null)
         if (!port) { warn('could not determine the dev-server port — pass { port }.'); return }
 
-        ac = new AbortController()
-        runTunnel({
-          api, token, port, host, log: info, signal: ac.signal,
-          onReady: async (url) => {
-            publicUrl = url
-            info(`tunnel open → ${url}`)
-            if (showWidget) info('AegisRunner widget ready — click the shield in your app to scan.')
-            if (scanOn === 'startup') {
-              info('waiting for your app to finish loading…')
-              await waitForAppReady(host, port, { log: info })
-              scan({ scope: 'site' })
-            } else info('press [a] + Enter to scan, or use the in-app widget')
-          },
-        }).catch((e) => err(`tunnel error: ${e.message}`))
+        session = createDevSession({ token, api, host, port, mode, scanOn, widget: showWidget, log: info })
+        if (showWidget) info('AegisRunner widget ready — click the shield in your app to scan.')
+        session.start()
+
+        if (scanOn === 'manual' && process.stdin.isTTY) {
+          process.stdin.on('data', (buf) => { if (String(buf).trim().toLowerCase() === 'a') session.scanSite() })
+        }
       })
 
-      if (scanOn === 'manual' && process.stdin.isTTY) {
-        process.stdin.on('data', (buf) => { if (String(buf).trim().toLowerCase() === 'a') scan({ scope: 'site' }) })
-      }
-
-      const close = () => { try { ac?.abort() } catch {} }
+      const close = () => { try { session?.stop() } catch { /* ignore */ } }
       server.httpServer?.once('close', close)
       const orig = server.close?.bind(server)
       if (orig) server.close = async (...a) => { close(); return orig(...a) }
     },
   }
-}
-
-function joinUrl(base, path) {
-  try { return new URL(path || '/', base).toString() } catch { return base }
 }

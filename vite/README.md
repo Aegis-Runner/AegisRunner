@@ -2,7 +2,9 @@
 
 A [Vite](https://vitejs.dev) plugin that attaches [AegisRunner](https://aegisrunner.com) to your dev server. One line in `vite.config` puts an **AI scan of your localhost app one keypress away** — no deploy, no staging URL, no second terminal. Covers Vue, React, Svelte and the rest of the Vite ecosystem.
 
-When your dev server starts, the plugin learns its port, opens a secure **outbound-only** tunnel to it, and holds it for the session. Press **`a`** (or set `scanOn: 'startup'`) and AegisRunner crawls your running app, generates tests, and streams progress into your dev log.
+By default the scan runs **entirely on your machine**: a real browser ([`@aegisrunner/scan-runner`](https://www.npmjs.com/package/@aegisrunner/scan-runner)) drives your app at `http://localhost` directly — **no tunnel, no cloud relay**. That's the fastest and most reliable path for big apps (hundreds of routes, Vite's unbundled module bursts), and your app and credentials never leave your machine. Press **`a`** (or set `scanOn: 'startup'`) and AegisRunner crawls your running app, generates tests, and streams progress into your dev log.
+
+Prefer to relay **our** cloud browser over a secure outbound tunnel instead (nothing to install locally)? Pass `aegis({ runner: 'tunnel' })`.
 
 ## Install
 
@@ -46,8 +48,8 @@ A floating AegisRunner **shield** appears in the corner of your dev app. Click i
   VITE v5  ready in 140 ms
   ➜  Local:   http://localhost:5173/
 
-  ◆ aegis   tunnel open → https://ab12cd.tunnel.aegisrunner.com
-  ◆ aegis   press [a] + Enter to scan your local app
+  ◆ aegis   AegisRunner widget ready — click the shield in your app to scan
+  ◆ aegis   local execution ready — the browser runs on your machine (no tunnel)
 ```
 
 ## Options
@@ -55,13 +57,17 @@ A floating AegisRunner **shield** appears in the corner of your dev app. Click i
 | Option | Default | Description |
 |--------|---------|-------------|
 | `token` | `process.env.AEGIS_TOKEN` | CI trigger token (Pro/Business). |
-| `scanOn` | `'manual'` | `'manual'` — press `a`. `'startup'` — scan once when the tunnel opens. |
+| `runner` | `'local'` | `'local'` — run the browser on your machine, scanning `http://localhost` directly (no tunnel). `'tunnel'` — relay our cloud browser over an outbound tunnel. |
+| `scanOn` | `'manual'` | `'manual'` — press `a` / click the widget. `'startup'` — scan once when the dev server is ready. |
 | `port` | detected | Dev-server port. Auto-detected from the running server; override if needed. |
-| `host` | `'127.0.0.1'` | Local host the tunnel forwards to. |
-| `label` | package name | Shown in every log line as `◆ aegis·<label>` — disambiguates tunnels when several dev servers run at once (monorepos / `turbo dev`). |
+| `host` | `'127.0.0.1'` | Local host your app listens on (what the runner scans, or the tunnel forwards to). |
+| `widget` | `true` | Inject the in-app shield widget. |
+| `label` | package name | Shown in every log line as `◆ aegis·<label>` — disambiguates several dev servers running at once (monorepos / `turbo dev`). |
 | `api` | public API | `process.env.AEGIS_API` override. |
 
-The plugin is **dev-only** (`apply: 'serve'`) — it never runs during `vite build`. The tunnel, scan trigger and live-progress stream are reused from [`@aegisrunner/cli`](https://www.npmjs.com/package/@aegisrunner/cli), so the protocol and auth live in one place. Prefer the raw command? [`aegis dev -- vite`](https://www.npmjs.com/package/@aegisrunner/cli) does the same thing without a config change.
+**Local mode** fetches the browser ([`@aegisrunner/scan-runner`](https://www.npmjs.com/package/@aegisrunner/scan-runner)) on the first scan (Chromium ~150MB, then cached) and logs in on your machine for gated pages, so **credentials never leave your network**. **Tunnel mode** needs no local browser but round-trips every request through the cloud.
+
+The plugin is **dev-only** (`apply: 'serve'`) — it never runs during `vite build`. The runner lifecycle, tunnel client, scan trigger and live-progress stream are reused from [`@aegisrunner/cli`](https://www.npmjs.com/package/@aegisrunner/cli), so the protocol and auth live in one place. Prefer the raw command? [`aegis dev -- vite`](https://www.npmjs.com/package/@aegisrunner/cli) does the same thing without a config change.
 
 ## Docs
 

@@ -1,23 +1,28 @@
 // @aegisrunner/nuxt — attach AegisRunner to your Nuxt dev server.
 //
-// Add the module and one config block: on `nuxt dev` it learns the dev-server
-// port (the `listen` hook), opens a secure outbound tunnel to it, and injects a
-// floating AegisRunner widget into your app — click it to "Test this page" or
-// "Test the whole site", add login credentials for gated pages, and watch
-// progress. A native Nuxt DevTools tab shows the same status with a one-click
-// "Scan now". You can also press `[a]` in the terminal, or scan on startup.
+// Add the module and one config block. On `nuxt dev` it learns the dev-server
+// port (the `listen` hook) and, by DEFAULT, runs the scan ENTIRELY on your
+// machine: a real browser (@aegisrunner/scan-runner) drives your app at
+// http://localhost directly — no cloud relay, no tunnel. That's the fastest,
+// most reliable path for big apps, and your app + credentials never leave your
+// machine. Prefer to relay OUR cloud browser over an outbound tunnel instead?
+// Set `aegis.runner: 'tunnel'`.
 //
-// The tunnel client, scan trigger, live-progress stream and the widget itself are
-// reused verbatim from @aegisrunner/cli, so the protocol + auth live in one place.
+// A floating AegisRunner widget is injected into your app — click it to "Test
+// this page" or "Test the whole site", add login credentials for gated pages,
+// and watch progress. A native Nuxt DevTools tab shows the same status with a
+// one-click "Scan now". You can also press [a] in the terminal, or scan on startup.
+//
+// The runner lifecycle, tunnel client, scan trigger, live-progress stream and the
+// widget all come from @aegisrunner/cli so the protocol + auth live in one place.
 import { defineNuxtModule, useLogger, addDevServerHandler } from '@nuxt/kit'
-import { runTunnel } from '@aegisrunner/cli/lib/tunnel.mjs'
-import { makeClient, streamScanEvents, waitForAppReady } from '@aegisrunner/cli/lib/api.mjs'
 import { deriveLabel, aegisTag } from '@aegisrunner/cli/lib/label.mjs'
-import { getWidgetJs, widgetStatus } from '@aegisrunner/cli/lib/devWidget.mjs'
+import { getWidgetJs } from '@aegisrunner/cli/lib/devWidget.mjs'
+import { createDevSession } from '@aegisrunner/cli/lib/devSession.mjs'
 
 export default defineNuxtModule({
   meta: { name: '@aegisrunner/nuxt', configKey: 'aegis' },
-  defaults: { scanOn: 'manual', host: '127.0.0.1', widget: true },
+  defaults: { scanOn: 'manual', host: '127.0.0.1', widget: true, runner: 'local' },
   setup(opts, nuxt) {
     if (!nuxt.options.dev) return // dev-only; no-op in build/production
 
@@ -28,87 +33,46 @@ export default defineNuxtModule({
       return
     }
     const api = opts.api || process.env.AEGIS_API
+    const mode = opts.runner === 'tunnel' ? 'tunnel' : 'local'
+    const showWidget = opts.widget !== false
 
-    // Shared state — the terminal, the DevTools panel AND the in-app widget read this.
-    const state = { tunnel: null, scanning: false, last: null, msg: null, creds: null }
-    let ac = null
+    // Created in the `listen` hook once the port is known. The dev-server handlers
+    // below are registered synchronously and delegate to it — always before the
+    // first request arrives (which only happens after the server is listening).
+    let session = null
 
-    // scope: 'site' (full crawl from root) | 'page' (just the current route).
-    async function scan({ scope = 'site', path = '/' } = {}) {
-      if (state.scanning) { logger.info('a scan is already running…'); return }
-      if (!state.tunnel) { logger.info('tunnel not ready yet — one moment.'); state.msg = 'Connecting…'; return }
-      state.scanning = true
-      const isPage = scope === 'page'
-      const baseUrl = isPage ? joinUrl(state.tunnel, path) : state.tunnel
-      state.msg = isPage ? 'Scanning this page…' : 'Scanning the whole site…'
-      try {
-        logger.info(state.msg + ` → ${baseUrl}`)
-        const body = { crawl: true, baseUrl }
-        if (isPage) { body.maxPages = 1; body.maxDepth = 0 }
-        if (state.creds && state.creds.username) body.credentials = { username: state.creds.username, password: state.creds.password || '' }
-        const res = await makeClient({ api, token }).trigger(body)
-        if (res.status === 'crawl_failed') { logger.error(`scan failed to start: ${res.error ?? 'unknown error'}`); state.last = { result: 'failed', error: res.error }; state.msg = `Scan failed: ${res.error ?? 'unknown error'}`; return }
-        state.last = { crawlId: res.crawl_id, dashboardUrl: res.dashboardUrl || null, result: 'running', pages: 0 }
-        if (res.dashboardUrl) logger.info(`results: ${res.dashboardUrl}`)
-        if (!res.crawl_id) return
-        await streamScanEvents({
-          api, token, crawlId: res.crawl_id,
-          onEvent: (event, d) => {
-            d = d || {}
-            if (event === 'crawl_progress') { state.last.pages = d.pagesFound ?? state.last.pages; state.msg = `Crawling · ${d.pagesFound ?? '?'} page(s)`; logger.info(state.msg) }
-            else if (event === 'ai_generation_progress') { state.last.phase = d.phase_label || d.phase; state.msg = `${d.phase_label || d.phase || 'Generating tests'}${d.progress != null ? ' · ' + d.progress + '%' : ''}`; logger.info(state.msg) }
-            else if (event === 'done') { state.last.result = d.result || 'ended'; state.msg = d.result === 'completed' ? '✓ Tests generated.' : `Scan ${d.result || 'ended'}.`; logger.info(state.msg) }
-          },
-        })
-      } catch (e) {
-        logger.error(`scan error: ${e.message}`); state.last = { result: 'failed', error: e.message }; state.msg = `Scan error: ${e.message}`
-      } finally {
-        state.scanning = false
-        if (!state.last || state.last.result === 'running') state.msg = 'Ready to scan.'
-      }
-    }
-
-    // Learn the port the dev server bound to, then open the tunnel.
     nuxt.hook('listen', (server, listener) => {
       const port = opts.port
         || listener?.address?.port
         || (typeof listener?.port === 'number' ? listener.port : null)
         || (typeof server?.address === 'function' ? server.address()?.port : null)
       if (!port) { logger.warn('could not determine the dev-server port — set aegis.port.'); return }
-      ac = new AbortController()
-      runTunnel({
-        api, token, port, host: opts.host, log: (m) => logger.info(m), signal: ac.signal,
-        onReady: async (url) => {
-          state.tunnel = url
-          logger.success(`tunnel open → ${url}`)
-          if (opts.widget !== false) logger.info('AegisRunner widget ready — click the shield in your app to scan.')
-          if (opts.scanOn === 'startup') {
-            logger.info('waiting for your app to finish loading…')
-            await waitForAppReady(opts.host, port, { log: (m) => logger.info(m) })
-            scan({ scope: 'site' })
-          } else logger.info('press [a] + Enter to scan (or use the in-app widget / DevTools tab)')
-        },
-      }).catch((e) => logger.error(`tunnel error: ${e.message}`))
+
+      session = createDevSession({
+        token, api, host: opts.host, port, mode,
+        scanOn: opts.scanOn, widget: showWidget, log: (m) => logger.info(m),
+      })
+      if (showWidget) logger.info('AegisRunner widget ready — click the shield in your app to scan.')
+      session.start()
     })
 
     if (opts.scanOn === 'manual' && process.stdin.isTTY) {
-      process.stdin.on('data', (b) => { if (String(b).trim().toLowerCase() === 'a') scan({ scope: 'site' }) })
+      process.stdin.on('data', (b) => { if (String(b).trim().toLowerCase() === 'a' && session) session.scanSite() })
     }
 
     // --- In-app widget: served + injected on every dev page. ---
-    if (opts.widget !== false) {
+    if (showWidget) {
       addDevServerHandler({ route: '/__aegis/widget.js', handler: (event) => {
         event.node.res.setHeader('content-type', 'application/javascript; charset=utf-8')
         return getWidgetJs()
       }})
       addDevServerHandler({ route: '/__aegis/status', handler: (event) => {
         event.node.res.setHeader('content-type', 'application/json')
-        return JSON.stringify(widgetStatus({ scanning: state.scanning, tunnel: state.tunnel, message: state.msg, resultsUrl: state.last?.dashboardUrl, error: state.last?.result === 'failed' }))
+        return JSON.stringify(session ? session.getStatus() : { scanning: false, message: 'Connecting…', error: false })
       }})
       addDevServerHandler({ route: '/__aegis/credentials', handler: async (event) => {
         const b = await readJsonBody(event)
-        state.creds = b && b.username ? { username: String(b.username), password: String(b.password || '') } : null
-        logger.info(state.creds ? `credentials set for ${state.creds.username}` : 'credentials cleared')
+        if (session) session.setCredentials({ username: String(b?.username || ''), password: String(b?.password || '') })
         event.node.res.setHeader('content-type', 'application/json')
         return JSON.stringify({ ok: true })
       }})
@@ -122,11 +86,18 @@ export default defineNuxtModule({
     // --- DevTools panel + shared scan/state handlers. ---
     addDevServerHandler({ route: '/__aegis/state', handler: (event) => {
       event.node.res.setHeader('content-type', 'application/json')
-      return JSON.stringify({ tunnel: state.tunnel, scanning: state.scanning, last: state.last })
+      const s = session?.state
+      return JSON.stringify({
+        mode: s?.mode || mode,
+        ready: !!s?.ready,
+        tunnel: s?.publicUrl || null,        // null in local mode
+        scanning: !!s?.scanning,
+        last: s?.last || null,
+      })
     }})
     addDevServerHandler({ route: '/__aegis/scan', handler: async (event) => {
       const b = await readJsonBody(event) // { scope?, path? } from the widget; empty from the panel
-      scan({ scope: b?.scope, path: b?.path }) // fire-and-forget; poll /status or /state
+      if (session) session.scan({ scope: b?.scope, path: b?.path }) // fire-and-forget; poll /status or /state
       event.node.res.setHeader('content-type', 'application/json')
       return JSON.stringify({ ok: true })
     }})
@@ -142,13 +113,9 @@ export default defineNuxtModule({
       view: { type: 'iframe', src: '/__aegis' },
     }))
 
-    nuxt.hook('close', () => { try { ac?.abort() } catch {} })
+    nuxt.hook('close', () => { try { session?.stop() } catch { /* ignore */ } })
   },
 })
-
-function joinUrl(base, path) {
-  try { return new URL(path || '/', base).toString() } catch { return base }
-}
 
 function readJsonBody(event) {
   return new Promise((resolve) => {
@@ -186,7 +153,7 @@ const PANEL_HTML = `<!doctype html><html><head><meta charset="utf8"><meta name="
   <h1>AegisRunner</h1>
   <p class="sub">Scan this localhost app with AI — no deploy.</p>
   <div class="card">
-    <div class="row"><span class="k">tunnel</span><span class="v" id="tunnel">—</span></div>
+    <div class="row"><span class="k">runs on</span><span class="v" id="where">—</span></div>
     <div class="row"><span class="k">status</span><span id="status" class="badge">idle</span></div>
   </div>
   <div class="card" id="lastCard" style="display:none">
@@ -201,10 +168,10 @@ const PANEL_HTML = `<!doctype html><html><head><meta charset="utf8"><meta name="
   async function pull(){
     try{
       const s=await (await fetch('/__aegis/state')).json()
-      $('tunnel').textContent=s.tunnel||'opening…'
-      const st=$('status'); st.className='badge '+(s.scanning?'run':(s.tunnel?'ok':'warn'))
-      st.textContent=s.scanning?'scanning…':(s.tunnel?'ready':'connecting')
-      $('scan').disabled=!s.tunnel||s.scanning
+      $('where').textContent = s.mode==='tunnel' ? (s.tunnel||'opening tunnel…') : 'your machine (local)'
+      const st=$('status'); st.className='badge '+(s.scanning?'run':(s.ready?'ok':'warn'))
+      st.textContent=s.scanning?'scanning…':(s.ready?'ready':'connecting')
+      $('scan').disabled=!s.ready||s.scanning
       if(s.last){$('lastCard').style.display=''
         const r=$('lastResult'); r.className='badge '+(s.last.result==='completed'?'ok':s.last.result==='running'?'run':'warn')
         r.textContent=s.last.result||'—'

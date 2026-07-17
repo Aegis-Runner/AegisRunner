@@ -1,6 +1,6 @@
 {
   "name": "@aegisrunner/nuxt",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Nuxt module that attaches AegisRunner to your dev server — scan your localhost app with AI, no deploy. Tunnel + one-keypress scan + a DevTools tab.",
   "type": "module",
   "main": "./module.mjs",
@@ -18,7 +18,7 @@
     "nuxt": "^3.0.0 || ^4.0.0"
   },
   "dependencies": {
-    "@aegisrunner/cli": "^1.0.20",
+    "@aegisrunner/cli": "^1.0.21",
     "@nuxt/kit": "^3.0.0"
   },
   "keywords": [
