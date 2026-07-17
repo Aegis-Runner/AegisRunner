@@ -30,8 +30,25 @@ npm run dev
 ```text
   ▲ Next.js  —  Local: http://localhost:3000
 
+  ◆ aegis   AegisRunner widget ready — click the shield in your app to scan
   ◆ aegis   tunnel open → https://ab12cd.tunnel.aegisrunner.com
-  ◆ aegis   press [a] + Enter to scan your local app
+```
+
+## In-app widget
+
+A floating AegisRunner **shield** is injected into your dev pages. Click it to
+**Test this page** (just the current route), **Test whole site** (a full crawl),
+or set **login credentials** for gated pages — with live progress and a link to
+the results. (Pass `{ widget: false }` to disable; `[a]` in the terminal still
+works.)
+
+The module serves the widget from a small local control server and proxies
+`/__aegis/*` to it via a dev-only rewrite, and injects the widget into the client
+bundle automatically. If your setup overrides the dev webpack entry and the shield
+doesn't appear, add it explicitly to your root layout (dev only):
+
+```jsx
+{process.env.NODE_ENV === 'development' && <script async src="/__aegis/widget.js" />}
 ```
 
 ## Options
