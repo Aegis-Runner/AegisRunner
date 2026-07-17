@@ -3,7 +3,12 @@ name: release-scan-runner
 # `aegis scan --local`) on a `scan-runner-v*` tag:
 #   git tag scan-runner-v1.0.0 && git push origin scan-runner-v1.0.0
 #
+# Publishes BOTH distribution channels of the scan-runner on the same tag:
+#   • npm  @aegisrunner/scan-runner   (Docker-free: npx installs Playwright)
+#   • image aegisrunner1/scan-runner  (Docker Hub + GHCR)
+#
 # Required repo secrets (already used by release-cli.yml):
+#   NPM_TOKEN            — npm automation token (publishes @aegisrunner/scan-runner)
 #   DOCKERHUB_USERNAME   — Docker Hub user (aegisrunner1)
 #   DOCKERHUB_TOKEN      — Docker Hub access token
 # GHCR uses the built-in GITHUB_TOKEN.
@@ -14,6 +19,24 @@ permissions:
   contents: read
   packages: write
 jobs:
+  npm:
+    name: Publish npm package (Docker-free)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scan-runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Pin version from the tag
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#scan-runner-v}"
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
   docker:
     name: Build & push scan-runner image
     runs-on: ubuntu-latest
