@@ -101,6 +101,11 @@ export default defineNuxtModule({
       event.node.res.setHeader('content-type', 'application/json')
       return JSON.stringify({ ok: true })
     }})
+    addDevServerHandler({ route: '/__aegis/run', handler: (event) => {
+      if (session) session.runTests() // run the latest generated suite; poll /status
+      event.node.res.setHeader('content-type', 'application/json')
+      return JSON.stringify({ ok: true })
+    }})
     addDevServerHandler({ route: '/__aegis', handler: (event) => {
       event.node.res.setHeader('content-type', 'text/html')
       return PANEL_HTML

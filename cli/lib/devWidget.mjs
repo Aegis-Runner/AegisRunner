@@ -49,7 +49,7 @@ export function widgetStatus({ scanning = false, tunnel = null, message = null, 
  * @param {()=>object} cb.getStatus                                   current { scanning, message, resultsUrl?, error? }
  * @returns {(req, res)=>Promise<boolean>}  true if it handled the request
  */
-export function createAegisControl({ onScan, setCredentials, getStatus }) {
+export function createAegisControl({ onScan, onRun, setCredentials, getStatus }) {
   return async function handle(req, res) {
     const url = (req.url || '').split('?')[0];
     if (!url.startsWith('/__aegis')) return false;
@@ -69,6 +69,10 @@ export function createAegisControl({ onScan, setCredentials, getStatus }) {
     if (req.method === 'POST' && url === '/__aegis/scan') {
       const body = await readJson(req);
       try { onScan({ scope: body.scope === 'page' ? 'page' : 'site', path: String(body.path || '/') }); } catch { /* ignore */ }
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && url === '/__aegis/run') {
+      try { if (onRun) onRun(); } catch { /* ignore */ }
       return json(res, 200, { ok: true });
     }
     if (req.method === 'POST' && url === '/__aegis/credentials') {

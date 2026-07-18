@@ -4,6 +4,9 @@
 // shadow root so it never collides with your app's styles. Served by the
 // vite/nuxt/next plugins at /__aegis/widget.js (dev only).
 (function () {
+  // SSR-safe: this file is also bundled into Next's client entry, which can be
+  // evaluated where there's no DOM. Bail unless we're really in a browser.
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (window.__aegisWidgetMounted) return;
   window.__aegisWidgetMounted = true;
 
@@ -67,6 +70,7 @@
       '<div class="bd">' +
         '<button class="act primary" data-scope="page">Test this page<span class="sub">this route</span></button>' +
         '<button class="act ghost" data-scope="site">Test whole site<span class="sub">full crawl</span></button>' +
+        '<button class="act ghost" id="aegis-run">Run generated tests<span class="sub">execute suite</span></button>' +
         '<div class="sep"></div>' +
         '<details class="creds">' +
           '<summary><span class="chev">›</span> Login credentials <span class="hint">(for gated pages)</span></summary>' +
@@ -84,6 +88,7 @@
   var dot = root.querySelector('.dot');
   var msg = root.querySelector('.msg');
   var actButtons = root.querySelectorAll('button.act');
+  var scopeButtons = root.querySelectorAll('button.act[data-scope]');
 
   root.querySelector('.fab').addEventListener('click', function () {
     panel.hidden = !panel.hidden;
@@ -91,13 +96,20 @@
   });
   root.querySelector('.x').addEventListener('click', function () { panel.hidden = true; });
 
-  actButtons.forEach(function (b) {
+  scopeButtons.forEach(function (b) {
     b.addEventListener('click', function () {
       var scope = b.getAttribute('data-scope');
       setStatus('run', scope === 'page' ? 'Scanning this page…' : 'Scanning the whole site…');
       setBusy(true);
       post('/scan', { scope: scope, path: location.pathname + location.search }).then(poll);
     });
+  });
+
+  var runBtn = root.querySelector('#aegis-run');
+  if (runBtn) runBtn.addEventListener('click', function () {
+    setStatus('run', 'Running your tests…');
+    setBusy(true);
+    post('/run', {}).then(poll);
   });
 
   root.querySelector('.save').addEventListener('click', function () {

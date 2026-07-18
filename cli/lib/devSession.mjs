@@ -15,7 +15,7 @@
 // binds `[a]`→scanSite, and calls start()/stop().
 
 import { runTunnel } from './tunnel.mjs'
-import { makeClient, streamScanEvents, waitForAppReady } from './api.mjs'
+import { makeClient, streamScanEvents, waitForAppReady, pollRun } from './api.mjs'
 import { createAegisControl } from './devWidget.mjs'
 import { startLocalRunner } from './localRunner.mjs'
 
@@ -153,6 +153,41 @@ export function createDevSession(opts = {}) {
     if (!state.last || state.last.result === 'running') state.msg = 'Ready to scan.'
   }
 
+  // Run the latest generated tests (execute, not scan). Local mode runs them on
+  // THIS machine via the runner; tunnel mode runs them in our cloud via the tunnel.
+  async function runTests() {
+    if (state.scanning) { log('a scan or run is already going…'); return }
+    const base = mode === 'local' ? `http://${host}:${port}` : state.publicUrl
+    if (mode === 'tunnel' && !base) { log('tunnel not ready yet — one moment.'); state.msg = 'Connecting…'; return }
+    state.scanning = true
+    try {
+      state.msg = 'Preparing to run your tests…'
+      if (mode === 'local') await ensureRunner()
+      state.msg = mode === 'local' ? 'Running your tests (on your machine)…' : 'Running your tests…'
+      log(state.msg)
+      // No crawl, no suiteIds → run the latest generated suite. local:true routes
+      // the cases to the runner; credentials stay on the runner in local mode.
+      const res = await client.trigger({ local: mode === 'local', baseUrl: base })
+      if (res.status === 'crawl_failed' || (res.error && !res.id)) {
+        state.last = { result: 'failed' }; state.msg = `Run failed: ${res.error ?? res.message ?? 'no generated tests yet — scan first'}`; log(state.msg); return
+      }
+      if (!res.id) { state.last = { result: 'ended' }; state.msg = 'No generated tests yet — run a scan first.'; log(state.msg); return }
+      state.last = { dashboardUrl: res.dashboardUrl || null, result: 'running' }
+      if (res.dashboardUrl) log(`results: ${res.dashboardUrl}`)
+      const run = await pollRun(client, res.id, { timeoutSec: 1800, log: (m) => { state.msg = m; log(m) } })
+      const passed = run.passed_cases ?? run.passedCases ?? 0
+      const failed = run.failed_cases ?? run.failedCases ?? 0
+      state.last.result = failed > 0 ? 'failed' : (run.status || 'completed')
+      state.msg = failed > 0 ? `✗ ${failed} test(s) failed${passed ? `, ${passed} passed` : ''}.` : `✓ ${passed} test(s) passed.`
+      log(state.msg)
+    } catch (e) {
+      log(`run error: ${e.message}`); state.last = { result: 'failed' }; state.msg = `Run error: ${e.message}`
+    } finally {
+      state.scanning = false
+      if (!state.last || state.last.result === 'running') state.msg = 'Ready to scan.'
+    }
+  }
+
   function getStatus() {
     return {
       scanning: state.scanning,
@@ -164,6 +199,7 @@ export function createDevSession(opts = {}) {
 
   const control = opts.widget === false ? null : createAegisControl({
     onScan: (r) => { scan(r) },
+    onRun: () => { runTests() },
     setCredentials,
     getStatus,
   })
@@ -202,7 +238,7 @@ export function createDevSession(opts = {}) {
     if (runner) { try { runner.stop() } catch { /* ignore */ } }
   }
 
-  return { state, control, scan, scanSite: () => scan({ scope: 'site' }), setCredentials, getStatus, start, stop }
+  return { state, control, scan, scanSite: () => scan({ scope: 'site' }), runTests, setCredentials, getStatus, start, stop }
 }
 
 function joinUrl(base, path) { try { return new URL(path || '/', base).toString() } catch { return base } }
