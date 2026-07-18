@@ -28,6 +28,7 @@ const COMMANDS = {
       browser: { type: 'string' },
       baseUrl: { type: 'string' },
       crawl: { type: 'bool', default: false },
+      local: { type: 'bool', default: false },
       wait: { type: 'bool', default: true },
       timeout: { type: 'int', default: 1800 },
       format: { type: 'string', default: 'text' },
@@ -44,6 +45,10 @@ Usage: aegis run [options]
   --base-url <url>      Base URL override (e.g. a preview deployment)
   --crawl               Scan the site first; tests are generated after the scan
                         (returns immediately — a CI token cannot poll scan progress)
+  --local               Run the browser on YOUR machine instead of our cloud —
+                        for localhost / private apps the cloud can't reach. Needs a
+                        connected runner (start one: aegis scan-runner). Point
+                        --base-url at your app (e.g. http://localhost:3000).
   --wait / --no-wait    Poll until the run finishes (default: wait)
   --timeout <sec>       Max seconds to wait (default 1800)
   --format <fmt>        text (default) | json | junit
@@ -302,6 +307,10 @@ async function cmdRun(opts) {
   if (opts.browser) body.browserProfile = opts.browser;
   if (opts.baseUrl) body.baseUrl = opts.baseUrl;
   if (opts.crawl) body.crawl = true;
+  // --local: execute the run on a connected self-hosted runner (browser on the
+  // user's machine). The backend routes it to the run broker instead of the
+  // cloud executor; credentials come from the runner's own env, not here.
+  if (opts.local) body.local = true;
 
   const api = client(opts);
   const res = await api.trigger(body);
