@@ -1,7 +1,7 @@
 // localRunner.mjs — start & supervise the local browser executor used by the
 // framework dev plugins' "local execution" mode (runner: 'local').
 //
-// The executor is @aegisrunner/scan-runner: a real headless Chromium (Playwright)
+// The executor is @aegisrunner/runner: a real headless Chromium (Playwright)
 // that claims scan jobs over OUTBOUND-only HTTPS and drives them against your app
 // on THIS machine — no cloud relay, no tunnel. It lives in its own package (so the
 // CLI/plugins stay light) and is fetched + cached on first use via `npx`. The token
@@ -38,7 +38,7 @@ export function startLocalRunner({ token, api, credentials, log = () => {}, onEx
     delete env.AEGIS_PASSWORD
   }
 
-  const child = spawn(npx, ['--yes', '@aegisrunner/scan-runner'], {
+  const child = spawn(npx, ['--yes', '@aegisrunner/runner'], {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: process.platform === 'win32',

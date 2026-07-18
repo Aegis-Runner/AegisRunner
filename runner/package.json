@@ -1,0 +1,36 @@
+{
+  "name": "@aegisrunner/runner",
+  "version": "1.2.0",
+  "description": "The AegisRunner self-hosted local executor — runs `aegis scan --local` scans AND `aegis run --local` test suites on your machine (browser stays local, brain + storage in the cloud). No Docker required.",
+  "type": "module",
+  "bin": {
+    "aegis-runner": "bin.mjs"
+  },
+  "main": "./runnerExecutor.mjs",
+  "files": [
+    "bin.mjs",
+    "runnerExecutor.mjs",
+    "README.md"
+  ],
+  "dependencies": {
+    "playwright": "1.60.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "keywords": [
+    "aegisrunner",
+    "testing",
+    "playwright",
+    "scanner",
+    "self-hosted",
+    "localhost"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Aegis-Runner/AegisRunner",
+    "directory": "scan-runner"
+  },
+  "homepage": "https://aegisrunner.com"
+}

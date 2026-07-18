@@ -1,0 +1,33 @@
+name: release-runner
+# Publishes @aegisrunner/runner — the canonical AegisRunner local executor (runs
+# `aegis scan --local` scans AND `aegis run --local` suites). npm-only: `npx`
+# installs Playwright, no Docker. (Docker users keep the aegisrunner1/scan-runner
+# image; this package supersedes the @aegisrunner/scan-runner npm name.)
+#
+#   git tag runner-v1.2.0 && git push origin runner-v1.2.0
+#
+# Required repo secret: NPM_TOKEN (npm automation token).
+on:
+  push:
+    tags: ['runner-v*']
+permissions:
+  contents: read
+jobs:
+  npm:
+    name: Publish @aegisrunner/runner
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Pin version from the tag
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#runner-v}"
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -774,8 +774,8 @@ async function cmdScanRunner(opts) {
   const env = { ...process.env, AEGIS_TOKEN: token };
   const api = opts.api || process.env.AEGIS_API;
   if (api) env.AEGIS_API = api;
-  log('starting the local browser executor via @aegisrunner/scan-runner (no Docker)…');
-  const child = spawn(npx, ['--yes', '@aegisrunner/scan-runner'], { env, stdio: 'inherit', shell: process.platform === 'win32' });
+  log('starting the local browser executor via @aegisrunner/runner (no Docker)…');
+  const child = spawn(npx, ['--yes', '@aegisrunner/runner'], { env, stdio: 'inherit', shell: process.platform === 'win32' });
   const onSig = () => { try { child.kill('SIGINT'); } catch { /* ignore */ } };
   process.on('SIGINT', onSig);
   process.on('SIGTERM', onSig);
