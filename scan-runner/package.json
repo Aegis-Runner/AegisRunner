@@ -1,7 +1,7 @@
 {
   "name": "@aegisrunner/scan-runner",
-  "version": "1.1.1",
-  "description": "Docker-free browser executor for 'aegis scan --local' — runs a local headless Chromium that scans your localhost/private/firewalled app; the AI brain + storage stay in AegisRunner's cloud, your app + credentials stay on your machine.",
+  "version": "1.2.0",
+  "description": "Docker-free local executor for AegisRunner — runs `aegis scan --local` scans AND `aegis run --local` test suites on your machine (browser stays local).",
   "type": "module",
   "bin": {
     "aegis-scan-runner": "./bin.mjs"
