@@ -1,0 +1,18 @@
+name: deprecate-scan-runner
+# One-shot: mark @aegisrunner/scan-runner deprecated in favour of the canonical
+# @aegisrunner/runner. Run manually (Actions → deprecate-scan-runner → Run).
+# The package stays published + installable; npm just shows the notice.
+on:
+  workflow_dispatch:
+jobs:
+  deprecate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Deprecate → @aegisrunner/runner
+        run: npm deprecate @aegisrunner/scan-runner "Renamed to @aegisrunner/runner (same executor, clearer name — it runs both `scan --local` and `run --local`). Please switch: npx @aegisrunner/runner."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
