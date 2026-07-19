@@ -1,6 +1,6 @@
 {
   "name": "@aegisrunner/next",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Next.js config wrapper that attaches AegisRunner to your dev server — scan your localhost app with AI, no deploy.",
   "type": "module",
   "main": "./index.mjs",

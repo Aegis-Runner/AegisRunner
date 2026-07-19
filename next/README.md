@@ -18,14 +18,24 @@ import withAegisRunner from '@aegisrunner/next'
 const nextConfig = { /* your config */ }
 
 export default withAegisRunner(nextConfig, {
+  token: process.env.AEGIS_TOKEN,   // see "Your token" below
   scanOn: 'manual', // 'manual' (press a) | 'startup' (scan on boot)
 })
 ```
 
+### Your token
+
+Provide your project **CI trigger token** (create one under **Manage → CI/CD**, Pro/Business) one of three ways — **never commit the literal token**:
+
 ```bash
-export AEGIS_TOKEN=aegis_xxxxxxxx   # a project CI trigger token (Pro/Business)
-npm run dev
+# 1. save it once (recommended) — every command AND the dev widget/plugins read it,
+#    so you can drop the `token` option entirely:
+npx @aegisrunner/cli login --token aegis_xxxxxxxx
+# 2. or an env var — a git-ignored .env your dev server loads, or your shell:
+export AEGIS_TOKEN=aegis_xxxxxxxx
 ```
+
+Precedence: the `token` option (above) → `AEGIS_TOKEN` env → the saved `aegis login` file.
 
 ```text
   ▲ Next.js  —  Local: http://localhost:3000
