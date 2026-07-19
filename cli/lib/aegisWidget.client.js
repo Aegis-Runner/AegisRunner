@@ -11,14 +11,18 @@
   window.__aegisWidgetMounted = true;
 
   var API = '/__aegis';
+  // Solid cyan shield + dark check — high contrast against the dark #0f172a button
+  // (the old dark-on-dark fill made the icon nearly invisible). currentColor lets
+  // the header reuse it at a different tint if needed.
   var SVG =
-    '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="20" height="20">' +
-    '<path d="M12 2.6l7 2.6v5.2c0 4.4-2.9 8.3-7 9.6-4.1-1.3-7-5.2-7-9.6V5.2l7-2.6z" fill="#0b1424" stroke="#22d3ee" stroke-width="1.4" stroke-linejoin="round"/>' +
-    '<path d="M8.6 12.2l2.4 2.4 4.4-4.6" stroke="#22d3ee" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="22" height="22" aria-hidden="true">' +
+    '<path d="M12 2.6l7 2.6v5.2c0 4.4-2.9 8.3-7 9.6-4.1-1.3-7-5.2-7-9.6V5.2l7-2.6z" fill="#22d3ee" stroke="#22d3ee" stroke-width="1.2" stroke-linejoin="round"/>' +
+    '<path d="M8.6 12.2l2.4 2.4 4.4-4.6" fill="none" stroke="#062a33" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   var CSS =
     ':host{all:initial}' +
     '*{box-sizing:border-box;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}' +
+    'svg{display:block}' +
     '.fab{position:fixed;right:20px;bottom:20px;width:46px;height:46px;border-radius:50%;background:#0f172a;' +
       'border:1px solid #334155;display:flex;align-items:center;justify-content:center;cursor:pointer;' +
       'z-index:2147483000;box-shadow:0 6px 22px rgba(2,6,23,.45);transition:transform .15s,border-color .15s}' +
