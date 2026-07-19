@@ -1,6 +1,6 @@
 {
   "name": "@aegisrunner/runner",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "The AegisRunner self-hosted local executor — runs `aegis scan --local` scans AND `aegis run --local` test suites on your machine (browser stays local, brain + storage in the cloud). No Docker required.",
   "type": "module",
   "bin": {
@@ -13,7 +13,11 @@
     "README.md"
   ],
   "dependencies": {
-    "playwright": "1.60.0"
+    "playwright": "1.60.0",
+    "@axe-core/playwright": "^4.11.3",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.34.5"
   },
   "engines": {
     "node": ">=18"
