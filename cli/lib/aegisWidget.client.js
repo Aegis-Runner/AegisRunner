@@ -44,6 +44,9 @@
     'button.ghost:hover:not(:disabled){border-color:#475569;background:#111c30}' +
     '.act .sub{margin-left:auto;font-weight:400;color:#64748b;font-size:11px}' +
     '.primary .sub{color:#0e5f70}' +
+    'button.act.running,button.act.running:disabled{opacity:1;border-color:#22d3ee;box-shadow:0 0 0 2px rgba(34,211,238,.4)}' +
+    'button.ghost.running{background:#0b1a24;color:#e2e8f0}' +
+    '.act.running .sub{color:#22d3ee}' +
     '.sep{height:1px;background:#1e293b;margin:2px 0}' +
     '.creds summary{cursor:pointer;color:#94a3b8;font-size:12px;padding:2px 0;list-style:none;display:flex;align-items:center;gap:6px}' +
     '.creds summary::-webkit-details-marker{display:none}' +
@@ -104,7 +107,7 @@
     b.addEventListener('click', function () {
       var scope = b.getAttribute('data-scope');
       setStatus('run', scope === 'page' ? 'Scanning this page…' : 'Scanning the whole site…');
-      setBusy(true);
+      setBusy(true, b);
       post('/scan', { scope: scope, path: location.pathname + location.search }).then(poll);
     });
   });
@@ -112,7 +115,7 @@
   var runBtn = root.querySelector('#aegis-run');
   if (runBtn) runBtn.addEventListener('click', function () {
     setStatus('run', 'Running your tests…');
-    setBusy(true);
+    setBusy(true, runBtn);
     post('/run', {}).then(poll);
   });
 
@@ -151,7 +154,20 @@
   }
 
   function setStatus(kind, text) { dot.className = 'dot' + (kind ? ' ' + kind : ''); msg.textContent = text; }
-  function setBusy(b) { actButtons.forEach(function (x) { x.disabled = b; }); }
+  // Track which action is actually running so its button stays highlighted (and
+  // full-opacity) while the others dim — instead of the static "primary" button
+  // always looking active. applyStatus() calls setBusy(true) with no button during
+  // polling; we keep the last-set active button in that case.
+  var activeScanBtn = null;
+  function setBusy(b, activeEl) {
+    if (b) { if (activeEl !== undefined) activeScanBtn = activeEl; }
+    else { activeScanBtn = null; }
+    actButtons.forEach(function (x) {
+      x.disabled = b;
+      if (b && x === activeScanBtn) x.classList.add('running');
+      else x.classList.remove('running');
+    });
+  }
   function escapeHtml(t) { var d = document.createElement('div'); d.textContent = String(t); return d.innerHTML; }
   function post(path, body) {
     return fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })

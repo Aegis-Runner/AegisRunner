@@ -145,7 +145,12 @@ export function createDevSession(opts = {}) {
       api, token, crawlId: res.crawl_id,
       onEvent: (event, d) => {
         d = d || {}
-        if (event === 'crawl_progress') { state.last.pages = d.pagesFound ?? state.last.pages; state.msg = `Crawling · ${d.pagesFound ?? '?'} page(s)`; log(state.msg) }
+        if (event === 'crawl_progress') { state.last.pages = d.pagesFound ?? state.last.pages; state.msg = `Scanning · ${d.pagesFound ?? '?'} page(s)`; log(state.msg) }
+        // The crawl finishing is NOT the end — the AI still turns the scan into
+        // test cases (goal pipeline, ~1-2 min). Bridge the gap so the widget shows
+        // clear progress instead of looking finished/stuck between the last
+        // crawl_progress and the first ai_generation_progress event.
+        else if (event === 'crawl_completed') { state.msg = 'Scan complete · generating tests…'; log(state.msg) }
         else if (event === 'ai_generation_progress') { state.msg = `${d.phase_label || d.phase || 'Generating tests'}${d.progress != null ? ' · ' + d.progress + '%' : ''}`; log(state.msg) }
         else if (event === 'done') { state.last.result = d.result || 'ended'; state.msg = d.result === 'completed' ? '✓ Tests generated.' : `Scan ${d.result || 'ended'}.`; log(state.msg) }
       },
