@@ -38,7 +38,9 @@ export function startLocalRunner({ token, api, credentials, log = () => {}, onEx
     delete env.AEGIS_PASSWORD
   }
 
-  const child = spawn(npx, ['--yes', '@aegisrunner/runner'], {
+  // Pin @latest so a stale npx cache can't keep re-running an older, broken
+  // runner build (npx reuses a cached unversioned spec indefinitely).
+  const child = spawn(npx, ['--yes', '@aegisrunner/runner@latest'], {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: process.platform === 'win32',
