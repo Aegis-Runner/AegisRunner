@@ -1,6 +1,6 @@
 {
   "name": "@aegisrunner/vite",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Vite plugin that attaches AegisRunner to your dev server — scan your localhost app with AI, no deploy. Covers Vue, React, Svelte and the rest of the Vite ecosystem.",
   "type": "module",
   "main": "./index.mjs",
@@ -18,7 +18,7 @@
     "vite": ">=4"
   },
   "dependencies": {
-    "@aegisrunner/cli": "^1.0.21"
+    "@aegisrunner/cli": "^1.0.25"
   },
   "keywords": [
     "vite",

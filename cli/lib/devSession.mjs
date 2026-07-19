@@ -16,6 +16,7 @@
 
 import { runTunnel } from './tunnel.mjs'
 import { makeClient, streamScanEvents, waitForAppReady, pollRun } from './api.mjs'
+import { resolveToken, resolveApi } from './config.mjs'
 import { createAegisControl } from './devWidget.mjs'
 import { startLocalRunner } from './localRunner.mjs'
 
@@ -31,7 +32,10 @@ import { startLocalRunner } from './localRunner.mjs'
  * @param {(msg:string)=>void} [opts.log]
  */
 export function createDevSession(opts = {}) {
-  const { token, api } = opts
+  // Token/API: --token/env passed by the plugin win, else fall back to the saved
+  // config (~/.config/aegis/config.json or .aegisrc) so `aegis login` once is enough.
+  const token = resolveToken(opts)
+  const api = resolveApi(opts) || undefined
   const host = opts.host || '127.0.0.1'
   const port = opts.port
   const mode = opts.mode === 'tunnel' ? 'tunnel' : 'local'

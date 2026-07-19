@@ -6,6 +6,7 @@ import { dirname } from 'node:path';
 import { parseArgs, UsageError } from '../lib/args.mjs';
 import { makeClient, pollRun, ApiError, DEFAULT_API, waitForAppReady } from '../lib/api.mjs';
 import { buildJUnit } from '../lib/junit.mjs';
+import { resolveToken, resolveApi, saveConfig, readConfig, userConfigPath } from '../lib/config.mjs';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const log = (msg) => process.stderr.write(msg + '\n');
@@ -58,6 +59,27 @@ Usage: aegis run [options]
 
 Exit codes: 0 all passed · 1 test failures · 2 error/timeout/cancelled`,
     fn: cmdRun,
+  },
+  login: {
+    spec: { ...COMMON },
+    help: `aegis login — save your CI token once so you never export AEGIS_TOKEN again
+
+Usage:
+  aegis login --token aegis_xxx          # save the token
+  printf %s "$TOK" | aegis login         # read the token from stdin (safer)
+  aegis login --api https://…/api/v1     # (optional) also pin an API base
+  aegis logout                           # remove the saved token
+
+Writes ~/.config/aegis/config.json (mode 0600). Every command AND the dev
+widget/plugins then read it automatically. Precedence stays: --token flag >
+AEGIS_TOKEN env > this file — so CI is unaffected. A project-local .aegisrc
+(gitignored) works too.`,
+    fn: cmdLogin,
+  },
+  logout: {
+    spec: { ...COMMON },
+    help: `aegis logout — remove the saved CI token from ~/.config/aegis/config.json`,
+    fn: cmdLogout,
   },
   scan: {
     spec: { ...COMMON, url: { type: 'string' }, wait: { type: 'bool', default: false }, watch: { type: 'bool', default: false }, tunnel: { type: 'bool', default: false }, local: { type: 'bool', default: false }, port: { type: 'int' }, host: { type: 'string', default: '127.0.0.1' }, role: { type: 'string' }, username: { type: 'string' }, passwordStdin: { type: 'bool', default: false } },
@@ -263,16 +285,18 @@ Commands:
   tunnel       Expose a local app to the cloud scanner (behind a firewall/NAT)
   runner       Run a self-hosted runner inside your network (outbound-only)
   runner-enqueue  Queue a job for a self-hosted runner
+  login        Save your CI token once (no more exporting AEGIS_TOKEN)
+  logout       Remove the saved CI token
 
-Auth: pass --token or set AEGIS_TOKEN to a CI trigger token (Manage → CI/CD).
-API base via --api or AEGIS_API (default ${DEFAULT_API}).
+Auth: pass --token, set AEGIS_TOKEN, or run "aegis login" once to save a CI
+trigger token (Manage → CI/CD). API base via --api or AEGIS_API (default ${DEFAULT_API}).
 
 Run "aegis <command> --help" for command options.`;
 
 function client(opts) {
-  const token = opts.token || process.env.AEGIS_TOKEN;
-  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
-  return makeClient({ api: opts.api || process.env.AEGIS_API, token });
+  const token = resolveToken(opts);
+  if (!token) throw new UsageError('Missing token: pass --token, set AEGIS_TOKEN, or save one with `aegis login`');
+  return makeClient({ api: resolveApi(opts) || undefined, token });
 }
 
 // Map a finished run to the CI exit code. The API's exitCode only covers
@@ -448,7 +472,7 @@ async function watchScan(opts, crawlId) {
   const deadline = Date.now() + 35 * 60 * 1000;
   while (result === null && Date.now() < deadline) {
     try {
-      await streamScanEvents({ api: opts.api || process.env.AEGIS_API, token: opts.token || process.env.AEGIS_TOKEN, crawlId, onEvent });
+      await streamScanEvents({ api: opts.api || process.env.AEGIS_API, token: resolveToken(opts), crawlId, onEvent });
     } catch { /* connection error — reconnect */ }
     if (result === null) await new Promise((r) => setTimeout(r, 2000));
   }
@@ -465,8 +489,8 @@ async function watchScan(opts, crawlId) {
 // two-terminal juggling, no dropped tunnel, no URL to copy).
 async function cmdScanViaTunnel(opts) {
   if (!opts.port) throw new UsageError('Usage: aegis scan --tunnel --port <port>  (e.g. --port 3000)');
-  const token = opts.token || process.env.AEGIS_TOKEN;
-  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const token = resolveToken(opts);
+  if (!token) throw new UsageError('Missing token: pass --token, set AEGIS_TOKEN, or save one with `aegis login`');
   // Resolve auth BEFORE opening the tunnel: validates the flags and consumes
   // --password-stdin up front, so a bad login or empty stdin fails fast instead
   // of after the tunnel is live.
@@ -547,8 +571,8 @@ async function cmdDev(opts, positional) {
   if (childCmd.length === 0) {
     throw new UsageError('Usage: aegis dev [--port <p>] -- <your dev command>\n  e.g.  aegis dev --port 3000 -- npm run dev');
   }
-  const token = opts.token || process.env.AEGIS_TOKEN;
-  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const token = resolveToken(opts);
+  if (!token) throw new UsageError('Missing token: pass --token, set AEGIS_TOKEN, or save one with `aegis login`');
 
   const { spawn } = await import('node:child_process');
   const { runTunnel } = await import('../lib/tunnel.mjs');
@@ -730,8 +754,8 @@ async function cmdMobileScan(opts) {
 }
 
 async function cmdMobileRunner(opts) {
-  const token = opts.token || process.env.AEGIS_TOKEN;
-  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const token = resolveToken(opts);
+  if (!token) throw new UsageError('Missing token: pass --token, set AEGIS_TOKEN, or save one with `aegis login`');
   const apk = opts.apk || process.env.AEGIS_APK;
   if (!apk) throw new UsageError('Usage: aegis mobile-runner --apk ./app.apk  (path the local Appium can read)');
   const { runMobileExecutor } = await import('../lib/mobileExecutor.mjs');
@@ -747,24 +771,24 @@ async function cmdMobileRunner(opts) {
 
 async function cmdTunnel(opts) {
   if (!opts.port) throw new UsageError('Usage: aegis tunnel --port <port>  (e.g. --port 3000)');
-  const token = opts.token || process.env.AEGIS_TOKEN;
-  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const token = resolveToken(opts);
+  if (!token) throw new UsageError('Missing token: pass --token, set AEGIS_TOKEN, or save one with `aegis login`');
   const { runTunnel } = await import('../lib/tunnel.mjs');
   await runTunnel({ api: opts.api || process.env.AEGIS_API, token, port: opts.port, host: opts.host, log });
   return 0; // runTunnel loops until Ctrl-C (which exits directly)
 }
 
 async function cmdRunner(opts) {
-  const token = opts.token || process.env.AEGIS_TOKEN;
-  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const token = resolveToken(opts);
+  if (!token) throw new UsageError('Missing token: pass --token, set AEGIS_TOKEN, or save one with `aegis login`');
   const { runRunner } = await import('../lib/runner.mjs');
   await runRunner({ api: opts.api || process.env.AEGIS_API, token, log });
   return 0; // loops until Ctrl-C
 }
 
 async function cmdScanRunner(opts) {
-  const token = opts.token || process.env.AEGIS_TOKEN;
-  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const token = resolveToken(opts);
+  if (!token) throw new UsageError('Missing token: pass --token, set AEGIS_TOKEN, or save one with `aegis login`');
   // The browser executor needs Playwright (~a heavy dep), so it lives in its own
   // package to keep this CLI zero-dependency. Delegate to it via npx — installed
   // + cached on first use. The token/api go via ENV (not argv) so they don't leak
@@ -785,8 +809,8 @@ async function cmdScanRunner(opts) {
 
 async function cmdRunnerEnqueue(opts) {
   if (!opts.url) throw new UsageError('Usage: aegis runner-enqueue --url <target>');
-  const token = opts.token || process.env.AEGIS_TOKEN;
-  if (!token) throw new UsageError('Missing token: pass --token or set AEGIS_TOKEN');
+  const token = resolveToken(opts);
+  if (!token) throw new UsageError('Missing token: pass --token, set AEGIS_TOKEN, or save one with `aegis login`');
   const base = (opts.api || process.env.AEGIS_API || DEFAULT_API).replace(/\/+$/, '');
   const auth = { Authorization: `Bearer ${token}` };
   const r = await fetch(`${base}/runner/enqueue`, {
@@ -821,6 +845,46 @@ async function cmdStatus(opts, positional) {
   if (opts.format === 'json') process.stdout.write(JSON.stringify(run, null, 2) + '\n');
   else process.stdout.write(summarize(run) + '\n');
   return run.isFinished ? exitCodeFor(run) : 0;
+}
+
+// Read all of stdin (for `printf %s "$TOK" | aegis login`). '' if a TTY.
+function readStdinAll() {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) { resolve(''); return; }
+    let d = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (c) => { d += c; });
+    process.stdin.on('end', () => resolve(d.replace(/\r?\n$/, '')));
+    process.stdin.on('error', () => resolve(''));
+  });
+}
+
+async function cmdLogin(opts) {
+  let token = opts.token;
+  if (!token) token = (await readStdinAll()).trim();
+  if (!token && !opts.api) {
+    throw new UsageError('Nothing to save. Pass --token aegis_… (or pipe it via stdin), and/or --api <base>.');
+  }
+  const patch = {};
+  if (token) {
+    if (!/^aegis_/.test(token)) log('Note: CI tokens usually start with "aegis_" — saving it anyway.');
+    patch.token = token;
+  }
+  if (opts.api) patch.api = opts.api;
+  const p = saveConfig(patch);
+  const shown = p.replace(process.env.HOME || '\0', '~');
+  log(`Saved ${Object.keys(patch).join(' + ')} to ${shown} (mode 0600).`);
+  log('aegis (and the dev widget/plugins) now read it automatically — no more AEGIS_TOKEN exports.');
+  return 0;
+}
+
+async function cmdLogout() {
+  const p = userConfigPath();
+  let had = false;
+  try { had = !!JSON.parse(readFileSync(p, 'utf8')).token; } catch { /* no file */ }
+  saveConfig({ token: '' }); // drops the token key, keeps any saved api
+  log(had ? `Removed the saved token from ${p}.` : `No saved token in ${p}.`);
+  return 0;
 }
 
 async function main() {
