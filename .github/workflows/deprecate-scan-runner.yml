@@ -12,7 +12,12 @@ jobs:
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
-      - name: Deprecate → @aegisrunner/runner
-        run: npm deprecate @aegisrunner/scan-runner "Renamed to @aegisrunner/runner (same executor, clearer name — it runs both `scan --local` and `run --local`). Please switch: npx @aegisrunner/runner."
+      # Use a block scalar (run: |) with NO backticks: a ": " inside a plain YAML
+      # scalar broke parsing (so workflow_dispatch was never registered + push
+      # runs failed), and backticks inside a double-quoted shell string get run as
+      # command substitution, mangling the notice.
+      - name: Deprecate to @aegisrunner/runner
+        run: |
+          npm deprecate @aegisrunner/scan-runner "Renamed to @aegisrunner/runner (same executor, clearer name -- it runs both scan --local AND run --local). Please switch to npx @aegisrunner/runner"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
